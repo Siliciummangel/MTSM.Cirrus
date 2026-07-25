@@ -4,7 +4,6 @@ using MTSM.Cirrus.API.Contracts.Responses;
 using MTSM.Cirrus.API.Mapping;
 using MTSM.Cirrus.Core.Abstractions;
 using MTSM.Cirrus.Core.Models;
-using MTSM.Cirrus.Core.Services;
 
 namespace MTSM.Cirrus.API.Controllers;
 
@@ -125,8 +124,8 @@ public sealed class ArchiveController : ControllerBase
         ArchiveFileResponse response =
             ArchiveResponseMapper.Map(result);
 
-        return CreatedAtAction(
-            nameof(GetMetadataAsync),
+        return CreatedAtRoute(
+            "GetArchiveMetadata",
             new
             {
                 archiveObjectId =
@@ -194,7 +193,8 @@ public sealed class ArchiveController : ControllerBase
     /// <summary>
     /// Returns the metadata of an archive object.
     /// </summary>
-    [HttpGet("{archiveObjectId:long}/metadata")]
+    [HttpGet("{archiveObjectId:long}/metadata",
+        Name = "GetArchiveMetadata")]
     [ProducesResponseType<ArchiveMetadataResponse>(
         StatusCodes.Status200OK)]
     [ProducesResponseType<ProblemDetails>(

@@ -1,8 +1,4 @@
-﻿using System;
-using System.Collections.Generic;
-using System.Text;
-
-namespace MTSM.Cirrus.Core.Exceptions;
+﻿namespace MTSM.Cirrus.Core.Exceptions;
 
 public class ArchiveException : Exception
 {

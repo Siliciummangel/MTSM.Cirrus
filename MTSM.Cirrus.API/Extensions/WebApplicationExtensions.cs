@@ -1,5 +1,5 @@
-﻿using MTSM.Cirrus.API.Middleware;
-using Microsoft.AspNetCore.Diagnostics.HealthChecks;
+﻿using Microsoft.AspNetCore.Diagnostics.HealthChecks;
+using MTSM.Cirrus.API.Middleware;
 using Scalar.AspNetCore;
 
 namespace MTSM.Cirrus.API.Extensions;

@@ -5,10 +5,7 @@ using Microsoft.Extensions.Options;
 using MTSM.Cirrus.Core.Abstractions;
 using MTSM.Cirrus.Core.Config;
 using MTSM.Cirrus.Core.Models;
-using System;
-using System.Collections.Generic;
 using System.Net;
-using System.Text;
 
 namespace MTSM.Cirrus.Core.Providers.S3;
 
@@ -68,6 +65,9 @@ public sealed class S3ObjectStorage : IObjectStorage, IDisposable
             Key = objectKey,
             InputStream = content,
             AutoCloseStream = false,
+            UseChunkEncoding = _options.UseChunkEncoding,
+            DisableDefaultChecksumValidation =
+                _options.DisableDefaultChecksumValidation,
             ContentType = string.IsNullOrWhiteSpace(contentType)
                 ? "application/octet-stream"
                 : contentType

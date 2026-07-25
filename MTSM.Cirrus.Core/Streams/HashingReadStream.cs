@@ -1,7 +1,4 @@
-﻿using System;
-using System.Collections.Generic;
-using System.Security.Cryptography;
-using System.Text;
+﻿using System.Security.Cryptography;
 
 namespace MTSM.Cirrus.Core.Streams;
 
@@ -153,13 +150,34 @@ public sealed class HashingReadStream : Stream
 
     public override bool CanWrite => false;
 
-    public override long Length =>
-        throw new NotSupportedException();
+    public override long Length
+    {
+        get
+        {
+            if (!_innerStream.CanSeek)
+            {
+                throw new NotSupportedException(
+                    "The underlying stream does not expose a length.");
+            }
+
+            return _innerStream.Length;
+        }
+    }
 
     public override long Position
     {
-        get => throw new NotSupportedException();
-        set => throw new NotSupportedException();
+        get
+        {
+            if (!_innerStream.CanSeek)
+            {
+                throw new NotSupportedException(
+                    "The underlying stream does not expose a position.");
+            }
+
+            return _innerStream.Position;
+        }
+        set => throw new NotSupportedException(
+            "Seeking is not supported by the hashing stream.");
     }
 
     public override void Flush()

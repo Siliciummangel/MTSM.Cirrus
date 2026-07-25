@@ -29,4 +29,17 @@ public sealed class S3Options
     /// Creates the archive bucket during the first write when it does not exist.
     /// </summary>
     public bool CreateBucketIfMissing { get; init; } = true;
+
+    /// <summary>
+    /// Enables HTTP chunked transfer encoding for object uploads.
+    /// Some S3-compatible object stores do not support this completely.
+    /// </summary>
+    public bool UseChunkEncoding { get; init; } = true;
+
+    /// <summary>
+    /// Disables the AWS SDK's default checksum validation.
+    /// This may be required for object stores with incomplete
+    /// support for AWS checksum headers.
+    /// </summary>
+    public bool DisableDefaultChecksumValidation { get; init; }
 }

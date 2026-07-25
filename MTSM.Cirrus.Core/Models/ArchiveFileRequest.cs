@@ -1,8 +1,4 @@
-﻿using System;
-using System.Collections.Generic;
-using System.Text;
-
-namespace MTSM.Cirrus.Core.Models;
+﻿namespace MTSM.Cirrus.Core.Models;
 
 public sealed class ArchiveFileRequest
 {
@@ -29,6 +25,7 @@ public sealed class ArchiveFileRequest
     public DateOnly? RetentionUntil { get; init; }
 
     public IReadOnlyCollection<ArchiveBusinessReferenceInput>
-        BusinessReferences { get; init; }
+        BusinessReferences
+    { get; init; }
         = Array.Empty<ArchiveBusinessReferenceInput>();
 }

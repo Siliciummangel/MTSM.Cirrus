@@ -1,7 +1,4 @@
 ﻿using MTSM.Cirrus.Core.Enums;
-using System;
-using System.Collections.Generic;
-using System.Text;
 
 namespace MTSM.Cirrus.Core.Models;
 

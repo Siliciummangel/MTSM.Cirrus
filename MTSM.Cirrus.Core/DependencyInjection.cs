@@ -1,7 +1,6 @@
 ﻿using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
-using Microsoft.Extensions.Options;
 using MTSM.Cirrus.Core.Abstractions;
 using MTSM.Cirrus.Core.Config;
 using MTSM.Cirrus.Core.Providers.S3;
@@ -75,6 +74,15 @@ public static class DependencyInjection
                 options => !string.IsNullOrWhiteSpace(
                     options.Region),
                 "S3 region is required.")
+            .Validate(
+                options =>
+                    Uri.TryCreate(
+                        options.ServiceUrl,
+                        UriKind.Absolute,
+                        out Uri? uri)
+                    && (uri.Scheme == Uri.UriSchemeHttp
+                        || uri.Scheme == Uri.UriSchemeHttps),
+                "A valid HTTP or HTTPS S3 service URL is required.")
             .ValidateOnStart();
 
         services.AddSingleton<IObjectStorage, S3ObjectStorage>();
