@@ -34,7 +34,7 @@ logger.LogInformation(
 
 try
 {
-    await dbContext.Database.MigrateAsync();
+    await dbContext.Database.MigrateAsync(CancellationToken.None);
 
     logger.LogInformation(
         "Cirrus database migrations completed successfully.");
