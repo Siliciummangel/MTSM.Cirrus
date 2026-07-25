@@ -63,12 +63,29 @@ public static class ArchiveResponseMapper
             result.RetentionUntil,
             result.RetentionPolicyId,
             result.ArchiveStatus,
+            result.DeletionRequestedAt,
+            result.DeletionRequestedBy,
+            result.PurgedAt,
             result.StorageVersionId,
             result.EncryptionKeyId,
             result.IsWormProtected,
             result.CreatedBy,
             references,
             events);
+    }
+
+    public static ArchiveDeletionRequestResponse Map(
+    ArchiveDeletionRequestResult result)
+    {
+        ArgumentNullException.ThrowIfNull(result);
+
+        return new ArchiveDeletionRequestResponse(
+            result.ArchiveObjectId,
+            result.ArchiveStatus,
+            result.DeletionRequestedAt,
+            result.DeletionRequestedBy,
+            result.PurgedAt,
+            result.StateChanged);
     }
 
     private static JsonElement? CloneJsonElement(

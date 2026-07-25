@@ -58,6 +58,9 @@ public sealed record ArchiveMetadataResult(
     DateOnly RetentionUntil,
     int? RetentionPolicyId,
     ArchiveStatus ArchiveStatus,
+    DateTimeOffset? DeletionRequestedAt,
+    string? DeletionRequestedBy,
+    DateTimeOffset? PurgedAt,
     string? StorageVersionId,
     string? EncryptionKeyId,
     bool IsWormProtected,
@@ -78,6 +81,8 @@ public sealed record ArchiveSearchItem(
     DateTimeOffset? ArchivedAt,
     DateOnly RetentionUntil,
     ArchiveStatus ArchiveStatus,
+    DateTimeOffset? DeletionRequestedAt,
+    DateTimeOffset? PurgedAt,
     IReadOnlyCollection<ArchiveBusinessReferenceResult> BusinessReferences);
 
 public sealed record ArchiveSearchResult(
@@ -95,3 +100,11 @@ public sealed record ArchiveIntegrityResult(
     long ExpectedSizeBytes,
     long ActualSizeBytes,
     DateTimeOffset VerifiedAt);
+
+public sealed record ArchiveDeletionRequestResult(
+    long ArchiveObjectId,
+    ArchiveStatus ArchiveStatus,
+    DateTimeOffset? DeletionRequestedAt,
+    string? DeletionRequestedBy,
+    DateTimeOffset? PurgedAt,
+    bool StateChanged);

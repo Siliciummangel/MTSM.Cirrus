@@ -10,9 +10,31 @@ public sealed class ArchiveObjectConfiguration
 {
     public void Configure(EntityTypeBuilder<ArchiveObject> builder)
     {
-        builder.ToTable("archive_object", t => t.HasCheckConstraint(
+        builder.ToTable(
+            "archive_object",
+            tableBuilder =>
+            {
+                tableBuilder.HasCheckConstraint(
                     "ck_archive_object_size_bytes",
-                    "size_bytes >= 0"));
+                    "size_bytes >= 0");
+
+                tableBuilder.HasCheckConstraint(
+                    "ck_archive_object_deletion_requested",
+                    """
+                    archive_status <> 'DeletionRequested'
+                    OR (
+                        deletion_requested_at IS NOT NULL
+                        AND deletion_requested_by IS NOT NULL
+                    )
+                    """);
+
+                tableBuilder.HasCheckConstraint(
+                    "ck_archive_object_purged",
+                    """
+                    archive_status <> 'Purged'
+                    OR purged_at IS NOT NULL
+                    """);
+            });
 
         builder.HasKey(x => x.ArchiveObjectId);
 
@@ -65,6 +87,15 @@ public sealed class ArchiveObjectConfiguration
             .HasDefaultValue(ArchiveStatus.Pending)
             .IsRequired();
 
+        builder.Property(x => x.DeletionRequestedAt)
+            .HasColumnType("timestamp with time zone");
+
+        builder.Property(x => x.DeletionRequestedBy)
+            .HasMaxLength(255);
+
+        builder.Property(x => x.PurgedAt)
+            .HasColumnType("timestamp with time zone");
+
         builder.Property(x => x.StorageVersionId)
             .HasMaxLength(1024);
 
@@ -78,8 +109,12 @@ public sealed class ArchiveObjectConfiguration
             .HasMaxLength(255)
             .IsRequired();
 
-        builder.HasIndex(x => new { x.BucketName, x.ObjectKey })
-            .IsUnique();
+        builder.HasIndex(x => new
+        {
+            x.BucketName,
+            x.ObjectKey
+        })
+        .IsUnique();
 
         builder.HasIndex(x => x.Sha256Hash);
 
@@ -88,6 +123,16 @@ public sealed class ArchiveObjectConfiguration
         builder.HasIndex(x => x.RetentionUntil);
 
         builder.HasIndex(x => x.ArchiveStatus);
+
+        builder.HasIndex(x => x.DeletionRequestedAt);
+
+        builder.HasIndex(x => x.PurgedAt);
+
+        builder.HasIndex(x => new
+        {
+            x.ArchiveStatus,
+            x.DeletionRequestedAt
+        });
 
         builder.HasIndex(x => new
         {

@@ -25,4 +25,9 @@ public interface IArchiveService
         long archiveObjectId,
         string actor,
         CancellationToken cancellationToken = default);
+
+    Task<ArchiveDeletionRequestResult> RequestDeletionAsync(
+        long archiveObjectId,
+        string actor,
+        CancellationToken cancellationToken = default);
 }

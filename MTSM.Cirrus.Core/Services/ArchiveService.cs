@@ -274,6 +274,9 @@ public sealed class ArchiveService : IArchiveService
                 x.RetentionUntil,
                 x.RetentionPolicyId,
                 x.ArchiveStatus,
+                x.DeletionRequestedAt,
+                x.DeletionRequestedBy,
+                x.PurgedAt,
                 x.StorageVersionId,
                 x.EncryptionKeyId,
                 x.IsWormProtected,
@@ -351,6 +354,8 @@ public sealed class ArchiveService : IArchiveService
                     x.ArchivedAt,
                     x.RetentionUntil,
                     x.ArchiveStatus,
+                    x.DeletionRequestedAt,
+                    x.PurgedAt,
 
                     x.BusinessReferences
                         .OrderBy(reference =>
@@ -499,6 +504,135 @@ public sealed class ArchiveService : IArchiveService
             verifiedAt);
     }
 
+    public async Task<ArchiveDeletionRequestResult> RequestDeletionAsync(
+        long archiveObjectId,
+        string actor,
+        CancellationToken cancellationToken = default)
+    {
+        ValidateArchiveObjectId(archiveObjectId);
+        ArgumentException.ThrowIfNullOrWhiteSpace(actor);
+
+        string normalizedActor = actor.Trim();
+
+        var executionStrategy =
+            _dbContext.Database.CreateExecutionStrategy();
+
+        return await executionStrategy.ExecuteAsync(
+            async () =>
+            {
+                _dbContext.ChangeTracker.Clear();
+
+                await using var transaction =
+                    await _dbContext.Database.BeginTransactionAsync(
+                        cancellationToken);
+
+                ArchiveObject? archiveObject =
+                    await _dbContext.ArchiveObjects
+                        .FromSqlInterpolated(
+                            $"""
+                            SELECT *
+                            FROM cirrus.archive_object
+                            WHERE archive_object_id = {archiveObjectId}
+                            FOR UPDATE
+                            """)
+                        .SingleOrDefaultAsync(cancellationToken);
+
+                if (archiveObject is null)
+                {
+                    throw new ArchiveObjectNotFoundException(
+                        archiveObjectId);
+                }
+
+                ArchiveDeletionRequestResult result;
+
+                switch (archiveObject.ArchiveStatus)
+                {
+                    case ArchiveStatus.Active:
+                        {
+                            DateTimeOffset requestedAt =
+                            DateTimeOffset.UtcNow;
+
+                            archiveObject.ArchiveStatus =
+                            ArchiveStatus.DeletionRequested;
+
+                            archiveObject.DeletionRequestedAt =
+                            requestedAt;
+
+                            archiveObject.DeletionRequestedBy =
+                            normalizedActor;
+
+                            archiveObject.Events.Add(
+                            new ArchiveEvent
+                            {
+                                EventType =
+                                    ArchiveEventType.DeletionRequested,
+
+                                EventTimestamp =
+                                    requestedAt,
+
+                                Actor =
+                                    normalizedActor,
+
+                                DetailsJson =
+                                    CreateDeletionRequestedDetails(
+                                        archiveObject)
+                            });
+
+                            await _dbContext.SaveChangesAsync(
+                            cancellationToken);
+
+                            result = new ArchiveDeletionRequestResult(
+                            archiveObject.ArchiveObjectId,
+                            archiveObject.ArchiveStatus,
+                            archiveObject.DeletionRequestedAt,
+                            archiveObject.DeletionRequestedBy,
+                            archiveObject.PurgedAt,
+                            StateChanged: true);
+
+                            break;
+                        }
+
+                    case ArchiveStatus.DeletionRequested:
+                        {
+                            result = new ArchiveDeletionRequestResult(
+                            archiveObject.ArchiveObjectId,
+                            archiveObject.ArchiveStatus,
+                            archiveObject.DeletionRequestedAt,
+                            archiveObject.DeletionRequestedBy,
+                            archiveObject.PurgedAt,
+                            StateChanged: false);
+
+                            break;
+                        }
+
+                    case ArchiveStatus.Purged:
+                        {
+                            result = new ArchiveDeletionRequestResult(
+                            archiveObject.ArchiveObjectId,
+                            archiveObject.ArchiveStatus,
+                            archiveObject.DeletionRequestedAt,
+                            archiveObject.DeletionRequestedBy,
+                            archiveObject.PurgedAt,
+                            StateChanged: false);
+
+                            break;
+                        }
+
+                    case ArchiveStatus.Pending:
+                    case ArchiveStatus.Error:
+                    default:
+                        throw new ArchiveObjectUnavailableException(
+                            archiveObjectId,
+                            archiveObject.ArchiveStatus);
+                }
+
+                await transaction.CommitAsync(
+                    cancellationToken);
+
+                return result;
+            });
+    }
+
     private async Task<ArchiveObject> GetActiveArchiveObjectAsync(
         long archiveObjectId,
         CancellationToken cancellationToken)
@@ -607,6 +741,12 @@ public sealed class ArchiveService : IArchiveService
             query = query.Where(x =>
                 x.ArchiveStatus ==
                 request.ArchiveStatus.Value);
+        }
+        else
+        {
+            query = query.Where(x =>
+                x.ArchiveStatus ==
+                ArchiveStatus.Active);
         }
 
         if (request.ReceivedFrom is not null)
@@ -740,6 +880,36 @@ public sealed class ArchiveService : IArchiveService
                     CreatedAt = createdAt
                 });
         }
+    }
+
+    private static JsonDocument CreateDeletionRequestedDetails(
+    ArchiveObject archiveObject)
+    {
+        return JsonDocument.Parse(
+            JsonSerializer.Serialize(
+                new
+                {
+                    previousStatus =
+                        ArchiveStatus.Active.ToString(),
+
+                    newStatus =
+                        ArchiveStatus.DeletionRequested.ToString(),
+
+                    retentionUntil =
+                        archiveObject.RetentionUntil,
+
+                    isWormProtected =
+                        archiveObject.IsWormProtected,
+
+                    bucketName =
+                        archiveObject.BucketName,
+
+                    objectKey =
+                        archiveObject.ObjectKey,
+
+                    storageVersionId =
+                        archiveObject.StorageVersionId
+                }));
     }
 
     private string CreateObjectKey(

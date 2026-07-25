@@ -40,6 +40,9 @@ public sealed record ArchiveMetadataResponse(
     DateOnly RetentionUntil,
     int? RetentionPolicyId,
     ArchiveStatus ArchiveStatus,
+    DateTimeOffset? DeletionRequestedAt,
+    string? DeletionRequestedBy,
+    DateTimeOffset? PurgedAt,
     string? StorageVersionId,
     string? EncryptionKeyId,
     bool IsWormProtected,
@@ -47,3 +50,10 @@ public sealed record ArchiveMetadataResponse(
     IReadOnlyCollection<ArchiveBusinessReferenceResponse> BusinessReferences,
     IReadOnlyCollection<ArchiveEventResponse> Events);
 
+public sealed record ArchiveDeletionRequestResponse(
+    long ArchiveObjectId,
+    ArchiveStatus ArchiveStatus,
+    DateTimeOffset? DeletionRequestedAt,
+    string? DeletionRequestedBy,
+    DateTimeOffset? PurgedAt,
+    bool StateChanged);

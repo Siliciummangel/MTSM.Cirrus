@@ -191,6 +191,59 @@ public sealed class ArchiveController : ControllerBase
     }
 
     /// <summary>
+    /// Requests the logical deletion of an archive object.
+    /// </summary>
+    /// <remarks>
+    /// This operation does not immediately remove the object from object storage.
+    /// The archive object is marked as DeletionRequested and will be processed
+    /// asynchronously by a background worker.
+    /// </remarks>
+    [HttpDelete("{archiveObjectId:long}")]
+    [ProducesResponseType<ArchiveDeletionRequestResponse>(
+        StatusCodes.Status202Accepted)]
+    [ProducesResponseType<ProblemDetails>(
+        StatusCodes.Status400BadRequest)]
+    [ProducesResponseType<ProblemDetails>(
+        StatusCodes.Status404NotFound)]
+    [ProducesResponseType<ProblemDetails>(
+        StatusCodes.Status409Conflict)]
+    [ProducesResponseType<ProblemDetails>(
+        StatusCodes.Status500InternalServerError)]
+    public async Task<ActionResult<ArchiveDeletionRequestResponse>>
+        RequestDeletionAsync(
+            [FromRoute] long archiveObjectId,
+            [FromHeader(Name = ActorHeaderName)] string? actor,
+            CancellationToken cancellationToken)
+    {
+        if (string.IsNullOrWhiteSpace(actor))
+        {
+            ModelState.AddModelError(
+                ActorHeaderName,
+                $"The HTTP header '{ActorHeaderName}' is required.");
+
+            return ValidationProblem(ModelState);
+        }
+
+        ArchiveDeletionRequestResult result =
+            await _archiveService.RequestDeletionAsync(
+                archiveObjectId,
+                actor.Trim(),
+                cancellationToken);
+
+        ArchiveDeletionRequestResponse response =
+            ArchiveResponseMapper.Map(result);
+
+        return AcceptedAtRoute(
+            "GetArchiveMetadata",
+            new
+            {
+                archiveObjectId =
+                    response.ArchiveObjectId
+            },
+            response);
+    }
+
+    /// <summary>
     /// Returns the metadata of an archive object.
     /// </summary>
     [HttpGet("{archiveObjectId:long}/metadata",

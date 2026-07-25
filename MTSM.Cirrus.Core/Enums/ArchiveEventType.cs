@@ -11,5 +11,7 @@ public enum ArchiveEventType
     RetryStarted,
     RetrySucceeded,
     RetentionApplied,
-    Deleted
+    DeletionRequested,
+    Purged,
+    PurgeFailed
 }

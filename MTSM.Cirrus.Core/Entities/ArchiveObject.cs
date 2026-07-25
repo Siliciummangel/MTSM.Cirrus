@@ -32,7 +32,14 @@ public sealed class ArchiveObject
 
     public int? RetentionPolicyId { get; set; }
 
-    public ArchiveStatus ArchiveStatus { get; set; } = ArchiveStatus.Pending;
+    public ArchiveStatus ArchiveStatus { get; set; }
+        = ArchiveStatus.Pending;
+
+    public DateTimeOffset? DeletionRequestedAt { get; set; }
+
+    public string? DeletionRequestedBy { get; set; }
+
+    public DateTimeOffset? PurgedAt { get; set; }
 
     public string? StorageVersionId { get; set; }
 

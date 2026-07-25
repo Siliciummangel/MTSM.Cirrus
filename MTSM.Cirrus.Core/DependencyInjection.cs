@@ -25,6 +25,10 @@ public static class DependencyInjection
                     npgsql.MigrationsAssembly(
                         "MTSM.Cirrus.Migration");
 
+                    npgsql.MigrationsHistoryTable(
+                        "__EFMigrationsHistory",
+                        "cirrus");
+
                     npgsql.EnableRetryOnFailure(
                         maxRetryCount: 5,
                         maxRetryDelay: TimeSpan.FromSeconds(10),
