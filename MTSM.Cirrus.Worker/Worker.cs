@@ -1,17 +1,22 @@
-namespace MTSM.Cirrus.Worker
+namespace MTSM.Cirrus.Worker;
+
+public class Worker(ILogger<Worker> logger) : BackgroundService
 {
-    public class Worker(ILogger<Worker> logger) : BackgroundService
+    protected override async Task ExecuteAsync(CancellationToken cancellationToken)
     {
-        protected override async Task ExecuteAsync(CancellationToken stoppingToken)
+        logger.LogInformation(
+            "Archive worker started. No background tasks are configured in the MVP.");
+
+        try
         {
-            while (!stoppingToken.IsCancellationRequested)
-            {
-                if (logger.IsEnabled(LogLevel.Information))
-                {
-                    logger.LogInformation("Worker running at: {time}", DateTimeOffset.Now);
-                }
-                await Task.Delay(1000, stoppingToken);
-            }
+            await Task.Delay(Timeout.Infinite, cancellationToken);
         }
+        catch (OperationCanceledException)
+        {
+            // Expected during shutdown.
+        }
+
+        logger.LogInformation(
+            "Archive worker stopped.");
     }
 }
