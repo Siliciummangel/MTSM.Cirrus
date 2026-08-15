@@ -45,6 +45,7 @@ Cirrus is designed as an infrastructure component for application-generated file
   - [Check whether an archive object exists](#check-whether-an-archive-object-exists)
   - [Download a file](#download-a-file)
   - [Search archive metadata](#search-archive-metadata)
+  - [Verify archive integrity](#verify-archive-integrity)
   - [Request logical deletion](#request-logical-deletion)
 - [Actor tracking](#actor-tracking)
 - [Business references](#business-references)
@@ -149,6 +150,7 @@ The MVP includes:
 - Downloading archived file content
 - Checking whether an archive object exists
 - Searching archive metadata
+- Manually verifying archive content integrity
 - Associating business references with an archive object
 - Recording archive events
 - Requesting logical deletion of an archive object
@@ -1310,6 +1312,70 @@ Invalid pagination, date ranges, hashes or enum values result in
 
 ---
 
+### Verify archive integrity
+
+Endpoint:
+
+```http
+POST /api/archive/{archiveObjectId}/verify-integrity
+```
+
+The caller must provide the `X-Actor` header.
+
+Example:
+
+```bash
+curl \
+  --request POST \
+  --header "X-Actor: max@example.org" \
+  "${BASE_URL}/api/archive/16/verify-integrity"
+```
+
+The operation reads the complete storage object and recalculates its
+SHA-256 hash and size. Both values are compared with the stored archive
+metadata. The result is recorded as an archive event.
+
+Example successful verification:
+
+```json
+{
+  "archiveObjectId": 16,
+  "isValid": true,
+  "expectedSha256Hash": "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+  "actualSha256Hash": "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+  "expectedSizeBytes": 12345,
+  "actualSizeBytes": 12345,
+  "verifiedAt": "2026-08-16T12:00:00Z"
+}
+```
+
+Successful status:
+
+```text
+200 OK
+```
+
+`200 OK` means that the verification was completed. It does not necessarily
+mean that the stored content is valid. Callers must inspect `isValid`. A hash
+or size mismatch returns `isValid: false` and records an
+`IntegrityCheckFailed` event.
+
+Possible responses:
+
+| Status | Meaning |
+|---|---|
+| `200 OK` | Verification completed; inspect `isValid` |
+| `400 Bad Request` | Invalid ID or missing actor |
+| `404 Not Found` | Archive object does not exist |
+| `409 Conflict` | Archive object is not active or cannot be verified |
+| `500 Internal Server Error` | Storage or archive operation failed |
+
+The endpoint performs a synchronous full read and may take significant time
+and storage bandwidth for large archive objects. Automatic or scheduled
+integrity verification remains outside the MVP.
+
+---
+
 ### Request logical deletion
 
 Endpoint:
@@ -1395,6 +1461,7 @@ X-Actor: actor-name
 The header is currently required for:
 
 - File download
+- Manual integrity verification
 - Logical deletion requests
 
 The actor can represent:

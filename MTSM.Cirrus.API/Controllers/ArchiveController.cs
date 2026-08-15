@@ -288,6 +288,50 @@ public sealed class ArchiveController : ControllerBase
     }
 
     /// <summary>
+    /// Verifies the integrity of an archived file.
+    /// </summary>
+    /// <remarks>
+    /// Reads the complete storage object, recalculates its SHA-256 hash and
+    /// size, compares both values with the stored metadata and records an
+    /// integrity event. A completed verification returns 200 OK even when
+    /// the comparison fails; inspect isValid for the result.
+    /// </remarks>
+    [HttpPost("{archiveObjectId:long}/verify-integrity")]
+    [ProducesResponseType<ArchiveIntegrityResponse>(
+        StatusCodes.Status200OK)]
+    [ProducesResponseType<ProblemDetails>(
+        StatusCodes.Status400BadRequest)]
+    [ProducesResponseType<ProblemDetails>(
+        StatusCodes.Status404NotFound)]
+    [ProducesResponseType<ProblemDetails>(
+        StatusCodes.Status409Conflict)]
+    [ProducesResponseType<ProblemDetails>(
+        StatusCodes.Status500InternalServerError)]
+    public async Task<ActionResult<ArchiveIntegrityResponse>>
+        VerifyIntegrityAsync(
+            [FromRoute] long archiveObjectId,
+            [FromHeader(Name = ActorHeaderName)] string? actor,
+            CancellationToken cancellationToken)
+    {
+        if (string.IsNullOrWhiteSpace(actor))
+        {
+            ModelState.AddModelError(
+                ActorHeaderName,
+                $"The HTTP header '{ActorHeaderName}' is required.");
+
+            return ValidationProblem(ModelState);
+        }
+
+        ArchiveIntegrityResult result =
+            await _archiveService.VerifyIntegrityAsync(
+                archiveObjectId,
+                actor.Trim(),
+                cancellationToken);
+
+        return Ok(ArchiveResponseMapper.Map(result));
+    }
+
+    /// <summary>
     /// Returns the metadata of an archive object.
     /// </summary>
     [HttpGet("{archiveObjectId:long}/metadata",

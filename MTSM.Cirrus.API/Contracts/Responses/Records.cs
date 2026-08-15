@@ -74,6 +74,15 @@ public sealed record ArchiveSearchResponse(
     long TotalCount,
     int TotalPages);
 
+public sealed record ArchiveIntegrityResponse(
+    long ArchiveObjectId,
+    bool IsValid,
+    string ExpectedSha256Hash,
+    string ActualSha256Hash,
+    long ExpectedSizeBytes,
+    long ActualSizeBytes,
+    DateTimeOffset VerifiedAt);
+
 public sealed record ArchiveDeletionRequestResponse(
     long ArchiveObjectId,
     ArchiveStatus ArchiveStatus,

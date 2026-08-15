@@ -130,6 +130,21 @@ public static class ArchiveResponseMapper
             result.TotalPages);
     }
 
+    public static ArchiveIntegrityResponse Map(
+        ArchiveIntegrityResult result)
+    {
+        ArgumentNullException.ThrowIfNull(result);
+
+        return new ArchiveIntegrityResponse(
+            result.ArchiveObjectId,
+            result.IsValid,
+            result.ExpectedSha256Hash,
+            result.ActualSha256Hash,
+            result.ExpectedSizeBytes,
+            result.ActualSizeBytes,
+            result.VerifiedAt);
+    }
+
     private static JsonElement? CloneJsonElement(
         JsonDocument? document)
     {
