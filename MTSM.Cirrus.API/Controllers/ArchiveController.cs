@@ -244,6 +244,50 @@ public sealed class ArchiveController : ControllerBase
     }
 
     /// <summary>
+    /// Searches archive metadata using optional filters and pagination.
+    /// </summary>
+    [HttpGet("search")]
+    [ProducesResponseType<ArchiveSearchResponse>(
+        StatusCodes.Status200OK)]
+    [ProducesResponseType<ProblemDetails>(
+        StatusCodes.Status400BadRequest)]
+    [ProducesResponseType<ProblemDetails>(
+        StatusCodes.Status500InternalServerError)]
+    public async Task<ActionResult<ArchiveSearchResponse>> SearchAsync(
+        [FromQuery] ArchiveSearchQuery query,
+        CancellationToken cancellationToken)
+    {
+        var request = new ArchiveSearchRequest
+        {
+            ArchiveObjectId = query.ArchiveObjectId,
+            Tenant = NormalizeOptionalValue(query.Tenant),
+            FileType = NormalizeOptionalValue(query.FileType),
+            SourceSystem = NormalizeOptionalValue(query.SourceSystem),
+            Partner = NormalizeOptionalValue(query.Partner),
+            OriginalFilename = NormalizeOptionalValue(query.OriginalFilename),
+            Sha256Hash = NormalizeOptionalValue(query.Sha256Hash),
+            ArchiveStatus = query.ArchiveStatus,
+            ReceivedFrom = query.ReceivedFrom,
+            ReceivedUntil = query.ReceivedUntil,
+            ArchivedFrom = query.ArchivedFrom,
+            ArchivedUntil = query.ArchivedUntil,
+            BusinessReferenceTypeId = query.BusinessReferenceTypeId,
+            BusinessReferenceValue =
+                NormalizeOptionalValue(query.BusinessReferenceValue),
+            BusinessType = NormalizeOptionalValue(query.BusinessType),
+            PageNumber = query.PageNumber,
+            PageSize = query.PageSize
+        };
+
+        ArchiveSearchResult result =
+            await _archiveService.SearchAsync(
+                request,
+                cancellationToken);
+
+        return Ok(ArchiveResponseMapper.Map(result));
+    }
+
+    /// <summary>
     /// Returns the metadata of an archive object.
     /// </summary>
     [HttpGet("{archiveObjectId:long}/metadata",

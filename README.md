@@ -1229,38 +1229,84 @@ Possible responses:
 
 ### Search archive metadata
 
-> **Implementation note:** Search exists in the Core service but may not yet be exposed through the current REST API. The final endpoint and contract must be verified before this section is enabled.
-
-Proposed endpoint:
+Endpoint:
 
 ```http
 GET /api/archive/search
 ```
 
-Potential search criteria:
+All filters are optional. Supported query parameters:
 
-- Tenant
-- Source system
-- File type
-- Archive status
-- Received date range
-- Business reference type
-- Business reference value
-- Business type
-- Pagination
+- `archiveObjectId`
+- `tenant`
+- `fileType`
+- `sourceSystem`
+- `partner`
+- `originalFilename`
+- `sha256Hash`
+- `archiveStatus`
+- `receivedFrom` and `receivedUntil`
+- `archivedFrom` and `archivedUntil`
+- `businessReferenceTypeId`
+- `businessReferenceValue`
+- `businessType`
+- `pageNumber` (default: `1`)
+- `pageSize` (default: `50`, maximum: `500`)
 
-Proposed example:
+Example:
 
 ```bash
 curl --get \
   "${BASE_URL}/api/archive/search" \
   --data-urlencode "tenant=example-tenant" \
   --data-urlencode "sourceSystem=example-application" \
-  --data-urlencode "page=1" \
+  --data-urlencode "archiveStatus=Active" \
+  --data-urlencode "pageNumber=1" \
   --data-urlencode "pageSize=50"
 ```
 
-The exact request and response contract will be documented once the REST endpoint is finalized.
+Successful status:
+
+```text
+200 OK
+```
+
+Example response:
+
+```json
+{
+  "items": [
+    {
+      "archiveObjectId": 16,
+      "fileType": "invoice",
+      "mimeType": "application/pdf",
+      "sourceSystem": "example-application",
+      "partner": null,
+      "originalFilename": "example.pdf",
+      "sha256Hash": "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+      "sizeBytes": 12345,
+      "receivedAt": "2026-07-27T18:30:00Z",
+      "archivedAt": "2026-07-27T18:30:01Z",
+      "retentionUntil": "2036-07-27",
+      "archiveStatus": "Active",
+      "deletionRequestedAt": null,
+      "purgedAt": null,
+      "businessReferences": []
+    }
+  ],
+  "pageNumber": 1,
+  "pageSize": 50,
+  "totalCount": 1,
+  "totalPages": 1
+}
+```
+
+Search results are ordered by `receivedAt` and then by
+`archiveObjectId`, both descending. An empty result returns an empty
+`items` array and `totalPages` set to `0`.
+
+Invalid pagination, date ranges, hashes or enum values result in
+`400 Bad Request`.
 
 ---
 

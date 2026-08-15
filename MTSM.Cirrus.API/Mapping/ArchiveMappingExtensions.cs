@@ -75,7 +75,7 @@ public static class ArchiveResponseMapper
     }
 
     public static ArchiveDeletionRequestResponse Map(
-    ArchiveDeletionRequestResult result)
+        ArchiveDeletionRequestResult result)
     {
         ArgumentNullException.ThrowIfNull(result);
 
@@ -86,6 +86,48 @@ public static class ArchiveResponseMapper
             result.DeletionRequestedBy,
             result.PurgedAt,
             result.StateChanged);
+    }
+
+    public static ArchiveSearchResponse Map(
+        ArchiveSearchResult result)
+    {
+        ArgumentNullException.ThrowIfNull(result);
+
+        ArchiveSearchItemResponse[] items =
+            result.Items
+                .Select(item =>
+                    new ArchiveSearchItemResponse(
+                        item.ArchiveObjectId,
+                        item.FileType,
+                        item.MimeType,
+                        item.SourceSystem,
+                        item.Partner,
+                        item.OriginalFilename,
+                        item.Sha256Hash,
+                        item.SizeBytes,
+                        item.ReceivedAt,
+                        item.ArchivedAt,
+                        item.RetentionUntil,
+                        item.ArchiveStatus,
+                        item.DeletionRequestedAt,
+                        item.PurgedAt,
+                        item.BusinessReferences
+                            .Select(reference =>
+                                new ArchiveBusinessReferenceResponse(
+                                    reference.BusinessReferenceTypeId,
+                                    reference.ReferenceValue,
+                                    reference.BusinessType,
+                                    reference.Tenant,
+                                    reference.CreatedAt))
+                            .ToArray()))
+                .ToArray();
+
+        return new ArchiveSearchResponse(
+            items,
+            result.PageNumber,
+            result.PageSize,
+            result.TotalCount,
+            result.TotalPages);
     }
 
     private static JsonElement? CloneJsonElement(

@@ -3,6 +3,7 @@ using Microsoft.AspNetCore.Server.Kestrel.Core;
 using Microsoft.Extensions.Options;
 using MTSM.Cirrus.API.Config;
 using MTSM.Cirrus.Core.Data;
+using System.Text.Json.Serialization;
 
 namespace MTSM.Cirrus.API.Extensions;
 
@@ -33,7 +34,11 @@ public static class ServiceCollectionExtensions
             IConfigureOptions<KestrelServerOptions>,
             ConfigureKestrelServerOptions>();
 
-        services.AddControllers();
+        services
+            .AddControllers()
+            .AddJsonOptions(options =>
+                options.JsonSerializerOptions.Converters.Add(
+                    new JsonStringEnumConverter()));
 
         services.AddProblemDetails();
 

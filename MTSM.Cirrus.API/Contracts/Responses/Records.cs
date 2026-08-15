@@ -50,6 +50,30 @@ public sealed record ArchiveMetadataResponse(
     IReadOnlyCollection<ArchiveBusinessReferenceResponse> BusinessReferences,
     IReadOnlyCollection<ArchiveEventResponse> Events);
 
+public sealed record ArchiveSearchItemResponse(
+    long ArchiveObjectId,
+    string FileType,
+    string? MimeType,
+    string SourceSystem,
+    string? Partner,
+    string OriginalFilename,
+    string? Sha256Hash,
+    long SizeBytes,
+    DateTimeOffset ReceivedAt,
+    DateTimeOffset? ArchivedAt,
+    DateOnly RetentionUntil,
+    ArchiveStatus ArchiveStatus,
+    DateTimeOffset? DeletionRequestedAt,
+    DateTimeOffset? PurgedAt,
+    IReadOnlyCollection<ArchiveBusinessReferenceResponse> BusinessReferences);
+
+public sealed record ArchiveSearchResponse(
+    IReadOnlyCollection<ArchiveSearchItemResponse> Items,
+    int PageNumber,
+    int PageSize,
+    long TotalCount,
+    int TotalPages);
+
 public sealed record ArchiveDeletionRequestResponse(
     long ArchiveObjectId,
     ArchiveStatus ArchiveStatus,
