@@ -105,6 +105,18 @@ public sealed class ArchiveObjectConfiguration
         builder.Property(x => x.IsWormProtected)
             .HasDefaultValue(false);
 
+        builder.Property(x => x.LastIntegrityCheckAt)
+            .HasColumnType("timestamp with time zone");
+
+        builder.Property(x => x.NextIntegrityCheckAt)
+            .HasColumnType("timestamp with time zone");
+
+        builder.Property(x => x.IntegrityCheckLeaseOwner)
+            .HasMaxLength(255);
+
+        builder.Property(x => x.IntegrityCheckLeaseUntil)
+            .HasColumnType("timestamp with time zone");
+
         builder.Property(x => x.CreatedBy)
             .HasMaxLength(255)
             .IsRequired();
@@ -127,6 +139,13 @@ public sealed class ArchiveObjectConfiguration
         builder.HasIndex(x => x.DeletionRequestedAt);
 
         builder.HasIndex(x => x.PurgedAt);
+
+        builder.HasIndex(x => new
+        {
+            x.ArchiveStatus,
+            x.NextIntegrityCheckAt,
+            x.IntegrityCheckLeaseUntil
+        });
 
         builder.HasIndex(x => new
         {

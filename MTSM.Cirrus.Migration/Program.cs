@@ -7,9 +7,8 @@ using MTSM.Cirrus.Core.Data;
 
 HostApplicationBuilder builder = Host.CreateApplicationBuilder(args);
 
-builder.Configuration
-    .AddUserSecrets<Program>(optional: true)
-    .AddEnvironmentVariables();
+builder.Configuration.AddUserSecrets<Program>(optional: true);
+builder.Configuration.AddEnvironmentVariables();
 
 string connectionString =
     builder.Configuration.GetConnectionString("ArchiveDatabase")

@@ -47,6 +47,14 @@ public sealed class ArchiveObject
 
     public bool IsWormProtected { get; set; }
 
+    public DateTimeOffset? LastIntegrityCheckAt { get; set; }
+
+    public DateTimeOffset? NextIntegrityCheckAt { get; set; }
+
+    public string? IntegrityCheckLeaseOwner { get; set; }
+
+    public DateTimeOffset? IntegrityCheckLeaseUntil { get; set; }
+
     public required string CreatedBy { get; set; }
 
     public RetentionPolicy? RetentionPolicy { get; set; }

@@ -6,8 +6,8 @@ It stores file content in an S3-compatible object storage system and persists se
 
 Cirrus is designed as an infrastructure component for application-generated files and raw business data. It is intentionally not a document management system.
 
-> **Project status:** Early development / pre-release  
-> **Planned first release:** `0.1.0`
+> **Project status:** `0.2.0` in development / pre-release
+> **Completed milestone:** MVP feature set (`0.1.0`)
 
 ---
 
@@ -29,6 +29,7 @@ Cirrus is designed as an infrastructure component for application-generated file
   - [Archive configuration](#archive-configuration)
   - [S3 configuration](#s3-configuration)
   - [API configuration](#api-configuration)
+  - [Worker integrity-check configuration](#worker-integrity-check-configuration)
   - [Environment variables](#environment-variables)
   - [Secrets](#secrets)
 - [Local setup](#local-setup)
@@ -162,7 +163,8 @@ The MVP includes:
 
 ### Explicitly outside the MVP
 
-The following features are intentionally deferred until after the MVP:
+The following features were intentionally deferred from the MVP. Scheduled
+integrity verification is the first feature being added for `0.2.0`:
 
 - Physical deletion of archived content
 - Processing deletion requests
@@ -172,8 +174,6 @@ The following features are intentionally deferred until after the MVP:
 - WORM enforcement
 - Immutable object storage enforcement
 - Object-lock management
-- Background integrity verification
-- Scheduled checksum verification
 - Automatic retry processing for failed operations
 - Garbage collection of orphaned database or storage records
 - Authentication and authorization
@@ -196,10 +196,10 @@ Important limitations include:
 - Deletion requests do not result in physical deletion.
 - Retention information is stored but not actively enforced.
 - WORM-related metadata does not provide WORM guarantees.
-- The worker currently performs no background processing.
+- The worker currently performs scheduled integrity checks only.
 - Operational deployment manifests are not yet included.
 - Backward compatibility is not guaranteed before version `1.0.0`.
-- The API contract may still change during MVP polishing.
+- The API and worker contracts may still change before `0.2.0`.
 
 Do not use the current development version as the sole mechanism for legal or regulatory compliance.
 
@@ -242,12 +242,11 @@ Cirrus separates file content, metadata, and application processing.
                           ┌──────────────────┐
                           │  archive-worker  │
                           │                  │
-                          │ MVP placeholder  │
+                          │ Integrity checks │
                           │                  │
                           │ Future tasks:    │
                           │ Purge            │
                           │ Retention        │
-                          │ Integrity checks │
                           └──────────────────┘
 ```
 
@@ -291,21 +290,28 @@ The API is stateless and can be deployed with multiple replicas.
 
 ### `archive-worker`
 
-The worker runtime is included in the MVP as a deployable placeholder.
+The worker performs scheduled integrity checks for active archive objects.
+It recalculates the SHA-256 hash and content size after an initial delay and
+then repeats the verification at a configurable interval.
 
-It currently performs no archive processing.
+Multiple worker instances can operate on the same database. Due checks are
+claimed using PostgreSQL row locking with `SKIP LOCKED` and a renewable lease.
+The lease identifies the active worker and becomes claimable again if a worker
+terminates unexpectedly. Completed and failed checks record the worker instance
+as the archive event actor.
 
-The worker is reserved for future background tasks such as:
+The worker remains reserved for additional background tasks such as:
 
 - Processing deletion requests
 - Enforcing retention rules
 - Physically purging archive content
-- Verifying checksums
 - Detecting inconsistent archive records
 - Retrying recoverable operations
 - Cleaning up orphaned data
 
-Keeping the worker runtime in the solution allows deployment structures to include the complete target runtime model from the beginning.
+Integrity checks use at-least-once processing semantics. A check can therefore
+be repeated after a worker or network failure, but concurrent healthy workers
+do not intentionally process the same archive object.
 
 ### `archive-migrate`
 
@@ -438,7 +444,7 @@ MTSM.Cirrus/
 | `MTSM.Cirrus.API` | REST API, HTTP contracts, middleware, OpenAPI and health endpoints |
 | `MTSM.Cirrus.Core` | Archive domain logic, persistence, entities and object-storage integration |
 | `MTSM.Cirrus.Migration` | Database migration execution |
-| `MTSM.Cirrus.Worker` | Future background processing; MVP placeholder |
+| `MTSM.Cirrus.Worker` | Scheduled integrity verification and future background processing |
 | `MTSM.Cirrus.Tests` | Automated tests |
 
 ---
@@ -713,6 +719,60 @@ Examples include:
 
 ---
 
+### Worker integrity-check configuration
+
+Scheduled integrity verification is configured in the worker:
+
+```json
+{
+  "IntegrityChecks": {
+    "Enabled": true,
+    "InitialVerificationDelayHours": 24,
+    "ReverificationIntervalDays": 180,
+    "FailureRetryDelayMinutes": 60,
+    "PollingIntervalSeconds": 60,
+    "BatchSize": 10,
+    "MaxConcurrentChecks": 2,
+    "LeaseDurationMinutes": 30,
+    "WorkerInstanceId": null
+  }
+}
+```
+
+| Setting | Default | Description |
+|---|---:|---|
+| `Enabled` | `true` | Enables scheduled integrity verification |
+| `InitialVerificationDelayHours` | `24` | Delay after archival before the first check |
+| `ReverificationIntervalDays` | `180` | Delay between completed checks |
+| `FailureRetryDelayMinutes` | `60` | Delay after a technical verification failure |
+| `PollingIntervalSeconds` | `60` | Delay when no full batch is available |
+| `BatchSize` | `10` | Maximum number of checks claimed at once |
+| `MaxConcurrentChecks` | `2` | Maximum checks processed concurrently per worker |
+| `LeaseDurationMinutes` | `30` | Initial and renewed ownership period for a check |
+| `WorkerInstanceId` | — | Optional stable prefix; hostname is used when omitted |
+
+Each process adds a random suffix to its instance ID. This keeps two processes
+on the same host distinguishable. In Kubernetes the hostname normally contains
+the pod name, so logs and archive event actors identify the responsible pod.
+
+Leases are renewed while content is being read. If a worker terminates, another
+worker can claim the check after the lease expires. Processing is at least once;
+after failures a verification may therefore be repeated.
+
+Environment-variable examples:
+
+```bash
+IntegrityChecks__InitialVerificationDelayHours="24"
+IntegrityChecks__ReverificationIntervalDays="180"
+IntegrityChecks__MaxConcurrentChecks="2"
+IntegrityChecks__WorkerInstanceId="cirrus-worker"
+```
+
+Increasing concurrency increases object-storage reads, database activity and
+network bandwidth. Keep it conservative for large archive objects.
+
+---
+
 ### Environment variables
 
 .NET maps double underscores to configuration section separators.
@@ -735,6 +795,9 @@ export S3__UseChunkEncoding="false"
 export S3__DisableDefaultChecksumValidation="true"
 
 export Api__MaxMultipartUploadSizeBytes="1073741824"
+
+export IntegrityChecks__InitialVerificationDelayHours="24"
+export IntegrityChecks__ReverificationIntervalDays="180"
 ```
 
 ---
@@ -931,16 +994,15 @@ dotnet run \
   --project MTSM.Cirrus.Worker
 ```
 
-The worker is currently a placeholder runtime.
+The worker schedules the first integrity check 24 hours after archival by
+default and repeats it every 180 days. Start the migration runtime before using
+the `0.2.0` worker so the scheduling and lease columns exist.
 
-It starts successfully, logs that no background tasks are configured for the MVP and waits until shutdown.
-
-It does not:
+The worker currently does not:
 
 - Process deletion requests
 - Delete files
 - Enforce retention
-- Run integrity checks
 
 ---
 
@@ -1800,12 +1862,14 @@ Cirrus calculates a SHA-256 hash during archival and stores it as metadata.
 This provides a reference checksum but does not currently mean:
 
 - Every download is automatically rehashed
-- Stored content is periodically verified
-- Object-storage corruption is automatically detected
 - The checksum is cryptographically signed
 - The metadata itself is tamper-proof
 
-Background integrity verification is planned after the MVP.
+The `0.2.0` worker periodically reads active storage objects and compares their
+SHA-256 hash and size with the stored metadata. A mismatch is recorded as an
+`IntegrityCheckFailed` event. Technical failures are queued and retried after a
+configurable delay. Cirrus records detected mismatches but does not currently
+repair, quarantine or replicate affected content automatically.
 
 ---
 
@@ -1829,9 +1893,9 @@ archive-api
     - S3-compatible object storage
 
 archive-worker
-  Replicas: initially 1
+  Replicas: 1 or more
   Type: long-running background service
-  MVP behavior: idle placeholder
+  Current behavior: scheduled integrity verification
   Network access:
     - PostgreSQL
     - S3-compatible object storage
@@ -2108,7 +2172,7 @@ MAJOR.MINOR.PATCH
 Example:
 
 ```text
-0.1.0
+0.2.0
 ```
 
 Meaning:
@@ -2127,7 +2191,7 @@ Before version `1.0.0`:
 - Backward compatibility is not guaranteed.
 - Release notes should explicitly describe breaking changes.
 
-The first MVP release is planned as:
+The MVP feature milestone is:
 
 ```text
 0.1.0
@@ -2137,7 +2201,7 @@ Potential later versions:
 
 ```text
 0.1.1  Bug fixes for the initial MVP
-0.2.0  First post-MVP functionality
+0.2.0  Scheduled worker integrity verification (in development)
 0.3.0  Additional operational features
 1.0.0  Stable supported contract
 ```
@@ -2170,6 +2234,8 @@ The MIT License permits use, copying, modification, distribution, sublicensing a
 
 Cirrus is under active development.
 
-The current focus is completing and polishing the MVP before publishing version `0.1.0`.
+The MVP feature set was completed as the `0.1.0` milestone. Current development
+targets `0.2.0`, beginning with distributed scheduled integrity verification in
+the worker runtime.
 
 Feedback, issue reports and contributions will be welcome once the public contribution process is defined.
