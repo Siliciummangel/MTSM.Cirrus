@@ -145,6 +145,22 @@ public static class ArchiveResponseMapper
             result.VerifiedAt);
     }
 
+    public static ArchiveIntegrityStatusResponse Map(
+        ArchiveIntegrityStatusResult result)
+    {
+        ArgumentNullException.ThrowIfNull(result);
+
+        return new ArchiveIntegrityStatusResponse(
+            result.ArchiveObjectId,
+            result.LastCheckedAt,
+            result.LastCheckIsValid,
+            result.LastCheckActor,
+            result.NextCheckAt,
+            result.IsCheckInProgress,
+            result.LeaseOwner,
+            result.LeaseUntil);
+    }
+
     private static JsonElement? CloneJsonElement(
         JsonDocument? document)
     {

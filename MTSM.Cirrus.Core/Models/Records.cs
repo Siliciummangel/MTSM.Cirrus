@@ -101,6 +101,16 @@ public sealed record ArchiveIntegrityResult(
     long ActualSizeBytes,
     DateTimeOffset VerifiedAt);
 
+public sealed record ArchiveIntegrityStatusResult(
+    long ArchiveObjectId,
+    DateTimeOffset? LastCheckedAt,
+    bool? LastCheckIsValid,
+    string? LastCheckActor,
+    DateTimeOffset? NextCheckAt,
+    bool IsCheckInProgress,
+    string? LeaseOwner,
+    DateTimeOffset? LeaseUntil);
+
 public sealed record ArchiveDeletionRequestResult(
     long ArchiveObjectId,
     ArchiveStatus ArchiveStatus,

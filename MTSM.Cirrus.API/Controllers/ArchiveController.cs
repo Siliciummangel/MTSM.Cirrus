@@ -332,6 +332,42 @@ public sealed class ArchiveController : ControllerBase
     }
 
     /// <summary>
+    /// Returns scheduling and execution status for integrity checks.
+    /// </summary>
+    [HttpGet("{archiveObjectId:long}/integrity-status")]
+    [ProducesResponseType<ArchiveIntegrityStatusResponse>(
+        StatusCodes.Status200OK)]
+    [ProducesResponseType<ProblemDetails>(
+        StatusCodes.Status400BadRequest)]
+    [ProducesResponseType<ProblemDetails>(
+        StatusCodes.Status404NotFound)]
+    [ProducesResponseType<ProblemDetails>(
+        StatusCodes.Status500InternalServerError)]
+    public async Task<ActionResult<ArchiveIntegrityStatusResponse>>
+        GetIntegrityStatusAsync(
+            [FromRoute] long archiveObjectId,
+            CancellationToken cancellationToken)
+    {
+        ArchiveIntegrityStatusResult? result =
+            await _archiveService.GetIntegrityStatusAsync(
+                archiveObjectId,
+                cancellationToken);
+
+        if (result is null)
+        {
+            return Problem(
+                statusCode: StatusCodes.Status404NotFound,
+                title: "Archive object not found",
+                detail:
+                    $"Archive object {archiveObjectId} does not exist.",
+                type: "https://httpstatuses.com/404",
+                instance: HttpContext.Request.Path);
+        }
+
+        return Ok(ArchiveResponseMapper.Map(result));
+    }
+
+    /// <summary>
     /// Returns the metadata of an archive object.
     /// </summary>
     [HttpGet("{archiveObjectId:long}/metadata",

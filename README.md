@@ -47,6 +47,7 @@ Cirrus is designed as an infrastructure component for application-generated file
   - [Download a file](#download-a-file)
   - [Search archive metadata](#search-archive-metadata)
   - [Verify archive integrity](#verify-archive-integrity)
+  - [Retrieve integrity-check status](#retrieve-integrity-check-status)
   - [Request logical deletion](#request-logical-deletion)
 - [Actor tracking](#actor-tracking)
 - [Business references](#business-references)
@@ -1433,8 +1434,60 @@ Possible responses:
 | `500 Internal Server Error` | Storage or archive operation failed |
 
 The endpoint performs a synchronous full read and may take significant time
-and storage bandwidth for large archive objects. Automatic or scheduled
-integrity verification remains outside the MVP.
+and storage bandwidth for large archive objects. Scheduled verification is
+performed separately by the `0.2.0` worker.
+
+---
+
+### Retrieve integrity-check status
+
+Endpoint:
+
+```http
+GET /api/archive/{archiveObjectId}/integrity-status
+```
+
+Example:
+
+```bash
+curl "${BASE_URL}/api/archive/16/integrity-status"
+```
+
+Example response:
+
+```json
+{
+  "archiveObjectId": 16,
+  "lastCheckedAt": "2026-08-16T12:00:00Z",
+  "lastCheckIsValid": true,
+  "lastCheckActor": "archive-worker/cirrus-worker-7d3f",
+  "nextCheckAt": "2027-02-12T12:00:00Z",
+  "isCheckInProgress": false,
+  "leaseOwner": null,
+  "leaseUntil": null
+}
+```
+
+The last-check fields include both manually requested and worker-triggered
+checks. Before any check has completed, they are `null`.
+
+The worker materializes the initial schedule during polling. Shortly after a
+new object is archived, `nextCheckAt` is therefore set to the archival time plus
+`InitialVerificationDelayHours`.
+
+While a scheduled check is running, `isCheckInProgress` is `true` and the lease
+fields identify the responsible worker claim. An expired lease may remain
+visible temporarily, but `isCheckInProgress` will be `false`; another worker can
+then claim the object.
+
+Possible responses:
+
+| Status | Meaning |
+|---|---|
+| `200 OK` | Integrity-check status returned |
+| `400 Bad Request` | Invalid archive object ID |
+| `404 Not Found` | Archive object does not exist |
+| `500 Internal Server Error` | Status lookup failed |
 
 ---
 

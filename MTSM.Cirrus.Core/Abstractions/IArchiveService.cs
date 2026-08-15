@@ -26,6 +26,10 @@ public interface IArchiveService
         string actor,
         CancellationToken cancellationToken = default);
 
+    Task<ArchiveIntegrityStatusResult?> GetIntegrityStatusAsync(
+        long archiveObjectId,
+        CancellationToken cancellationToken = default);
+
     Task<ArchiveDeletionRequestResult> RequestDeletionAsync(
         long archiveObjectId,
         string actor,

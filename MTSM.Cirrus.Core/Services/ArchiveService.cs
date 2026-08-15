@@ -504,6 +504,58 @@ public sealed class ArchiveService : IArchiveService
             verifiedAt);
     }
 
+    public async Task<ArchiveIntegrityStatusResult?> GetIntegrityStatusAsync(
+        long archiveObjectId,
+        CancellationToken cancellationToken = default)
+    {
+        ValidateArchiveObjectId(archiveObjectId);
+
+        ArchiveObject? archiveObject =
+            await _dbContext.ArchiveObjects
+                .AsNoTracking()
+                .SingleOrDefaultAsync(
+                    item => item.ArchiveObjectId == archiveObjectId,
+                    cancellationToken);
+
+        if (archiveObject is null)
+        {
+            return null;
+        }
+
+        ArchiveEvent? lastCheck =
+            await _dbContext.ArchiveEvents
+                .AsNoTracking()
+                .Where(archiveEvent =>
+                    archiveEvent.ArchiveObjectId == archiveObjectId
+                    && (archiveEvent.EventType ==
+                            ArchiveEventType.IntegrityVerified
+                        || archiveEvent.EventType ==
+                            ArchiveEventType.IntegrityCheckFailed))
+                .OrderByDescending(archiveEvent =>
+                    archiveEvent.EventTimestamp)
+                .ThenByDescending(archiveEvent =>
+                    archiveEvent.ArchiveEventId)
+                .FirstOrDefaultAsync(cancellationToken);
+
+        DateTimeOffset now = DateTimeOffset.UtcNow;
+        bool isCheckInProgress =
+            archiveObject.IntegrityCheckLeaseOwner is not null
+            && archiveObject.IntegrityCheckLeaseUntil > now;
+
+        return new ArchiveIntegrityStatusResult(
+            archiveObject.ArchiveObjectId,
+            lastCheck?.EventTimestamp,
+            lastCheck is null
+                ? null
+                : lastCheck.EventType ==
+                    ArchiveEventType.IntegrityVerified,
+            lastCheck?.Actor,
+            archiveObject.NextIntegrityCheckAt,
+            isCheckInProgress,
+            archiveObject.IntegrityCheckLeaseOwner,
+            archiveObject.IntegrityCheckLeaseUntil);
+    }
+
     public async Task<ArchiveDeletionRequestResult> RequestDeletionAsync(
         long archiveObjectId,
         string actor,

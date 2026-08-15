@@ -83,6 +83,16 @@ public sealed record ArchiveIntegrityResponse(
     long ActualSizeBytes,
     DateTimeOffset VerifiedAt);
 
+public sealed record ArchiveIntegrityStatusResponse(
+    long ArchiveObjectId,
+    DateTimeOffset? LastCheckedAt,
+    bool? LastCheckIsValid,
+    string? LastCheckActor,
+    DateTimeOffset? NextCheckAt,
+    bool IsCheckInProgress,
+    string? LeaseOwner,
+    DateTimeOffset? LeaseUntil);
+
 public sealed record ArchiveDeletionRequestResponse(
     long ArchiveObjectId,
     ArchiveStatus ArchiveStatus,

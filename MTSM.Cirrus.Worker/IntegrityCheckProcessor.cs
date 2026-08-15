@@ -27,6 +27,9 @@ public sealed class IntegrityCheckProcessor(
         DateTimeOffset leaseUntil =
             now.AddMinutes(_options.LeaseDurationMinutes);
 
+        await InitializeSchedulesAsync(
+            cancellationToken);
+
         long[] archiveObjectIds = await ClaimBatchAsync(
             leaseOwner,
             now,
@@ -61,10 +64,7 @@ public sealed class IntegrityCheckProcessor(
         return archiveObjectIds.Length;
     }
 
-    private async Task<long[]> ClaimBatchAsync(
-        string leaseOwner,
-        DateTimeOffset now,
-        DateTimeOffset leaseUntil,
+    private async Task InitializeSchedulesAsync(
         CancellationToken cancellationToken)
     {
         await using AsyncServiceScope scope =
@@ -79,6 +79,29 @@ public sealed class IntegrityCheckProcessor(
 
         await dbContext.Database.ExecuteSqlInterpolatedAsync(
             $"""
+            UPDATE cirrus.archive_object
+            SET next_integrity_check_at = archived_at + {initialDelay}
+            WHERE archive_status = 'Active'
+              AND archived_at IS NOT NULL
+              AND next_integrity_check_at IS NULL
+            """,
+            cancellationToken);
+    }
+
+    private async Task<long[]> ClaimBatchAsync(
+        string leaseOwner,
+        DateTimeOffset now,
+        DateTimeOffset leaseUntil,
+        CancellationToken cancellationToken)
+    {
+        await using AsyncServiceScope scope =
+            scopeFactory.CreateAsyncScope();
+
+        CirrusDbContext dbContext =
+            scope.ServiceProvider.GetRequiredService<CirrusDbContext>();
+
+        await dbContext.Database.ExecuteSqlInterpolatedAsync(
+            $"""
             UPDATE cirrus.archive_object AS archive_object
             SET integrity_check_lease_owner = {leaseOwner},
                 integrity_check_lease_until = {leaseUntil}
@@ -87,15 +110,11 @@ public sealed class IntegrityCheckProcessor(
                 FROM cirrus.archive_object AS candidate
                 WHERE candidate.archive_status = 'Active'
                   AND candidate.archived_at IS NOT NULL
-                  AND COALESCE(
-                        candidate.next_integrity_check_at,
-                        candidate.archived_at + {initialDelay}) <= {now}
+                  AND candidate.next_integrity_check_at <= {now}
                   AND (
                         candidate.integrity_check_lease_until IS NULL
                         OR candidate.integrity_check_lease_until <= {now})
-                ORDER BY COALESCE(
-                    candidate.next_integrity_check_at,
-                    candidate.archived_at + {initialDelay}),
+                ORDER BY candidate.next_integrity_check_at,
                     candidate.archive_object_id
                 FOR UPDATE SKIP LOCKED
                 LIMIT {_options.BatchSize}
