@@ -2048,21 +2048,38 @@ dotnet build \
 
 ### Test
 
-Run all automated tests:
+Automated tests currently cover `MTSM.Cirrus.Core`. The suite contains fast
+contract tests and PostgreSQL integration tests for database-specific behavior
+such as persistence, searching, row locking and concurrent deletion requests.
 
-```bash
-dotnet test MTSM.Cirrus.slnx
-```
-
-Run in Release configuration:
+Run the Core test suite in Release configuration:
 
 ```bash
 dotnet test \
-  MTSM.Cirrus.slnx \
+  MTSM.Cirrus.Core.Tests/MTSM.Cirrus.Core.Tests.csproj \
   --configuration Release
 ```
 
-A complete MVP test strategy should cover:
+The fast tests do not require external services. PostgreSQL integration tests
+use the `CIRRUS_TEST_POSTGRES` environment variable:
+
+```bash
+export CIRRUS_TEST_POSTGRES='Host=localhost;Port=5432;Database=cirrus_test;Username=cirrus;Password=change-me'
+
+dotnet test MTSM.Cirrus.Core.Tests/MTSM.Cirrus.Core.Tests.csproj \
+  --configuration Release
+```
+
+For safety, the configured database name must be exactly `test`, start with
+`test_`, or end with `_test`. The test fixture recreates the `cirrus` schema in
+that database, so the connection must point to a dedicated disposable test
+database.
+
+Without `CIRRUS_TEST_POSTGRES`, integration tests are reported as skipped on a
+developer machine. When `CI=true`, missing or unsafe PostgreSQL configuration
+causes them to fail instead, preventing an incomplete CI test run from passing.
+
+The Core suite covers:
 
 - Successful archival
 - SHA-256 calculation
@@ -2072,14 +2089,15 @@ A complete MVP test strategy should cover:
 - Metadata retrieval
 - Search behavior
 - Business references
-- Deletion requests
-- Idempotent deletion requests
+- Concurrent and idempotent deletion requests
 - Database rollback behavior
 - Object-storage failures
 - PostgreSQL failures
 - Request cancellation
 - Validation errors
-- Health checks
+
+See the [Core test-suite documentation](MTSM.Cirrus.Core.Tests/README.md) for
+PowerShell examples, database setup details and code-coverage commands.
 
 ---
 
