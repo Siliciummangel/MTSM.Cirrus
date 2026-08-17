@@ -17,6 +17,17 @@ namespace MTSM.Cirrus.Core.Services;
 public sealed class ArchiveService : IArchiveService
 {
     private const int MaximumPageSize = 500;
+    private const int MaximumActorLength = 255;
+    private const int MaximumBusinessReferenceValueLength = 255;
+    private const int MaximumBusinessReferences = 1000;
+    private const int MaximumBusinessTypeLength = 50;
+    private const int MaximumCreatedByLength = 255;
+    private const int MaximumFileTypeLength = 100;
+    private const int MaximumMimeTypeLength = 255;
+    private const int MaximumOriginalFilenameLength = 1024;
+    private const int MaximumPartnerLength = 255;
+    private const int MaximumSourceSystemLength = 255;
+    private const int MaximumTenantLength = 50;
 
     private readonly CirrusDbContext _dbContext;
     private readonly IObjectStorage _objectStorage;
@@ -42,10 +53,44 @@ public sealed class ArchiveService : IArchiveService
         ValidateArchiveRequest(request);
 
         DateTimeOffset now = DateTimeOffset.UtcNow;
+        string originalFilename = request.OriginalFilename.Trim();
+        string fileType = request.FileType.Trim();
+        string? mimeType = NormalizeOptionalValue(request.MimeType);
+        string sourceSystem = request.SourceSystem.Trim();
+        string? partner = NormalizeOptionalValue(request.Partner);
+        string createdBy = request.CreatedBy.Trim();
 
-        DateOnly retentionUntil = await ResolveRetentionUntilAsync(
-            request,
-            cancellationToken);
+        DateOnly retentionUntil;
+
+        try
+        {
+            retentionUntil = await ResolveRetentionUntilAsync(
+                request,
+                cancellationToken);
+
+            await ValidateBusinessReferenceTypesAsync(
+                request.BusinessReferences,
+                cancellationToken);
+        }
+        catch (OperationCanceledException)
+            when (cancellationToken.IsCancellationRequested)
+        {
+            throw;
+        }
+        catch (ArgumentException)
+        {
+            throw;
+        }
+        catch (Exception exception)
+        {
+            _logger.LogError(
+                exception,
+                "Validating archive metadata against the database failed.");
+
+            throw new ArchiveException(
+                "Validating archive metadata failed.",
+                exception);
+        }
 
         string objectKey = CreateObjectKey(
             request,
@@ -54,13 +99,13 @@ public sealed class ArchiveService : IArchiveService
         var archiveObject = new ArchiveObject
         {
             ObjectKey = objectKey,
-            BucketName = _options.BucketName,
+            BucketName = _options.BucketName.Trim(),
 
-            FileType = request.FileType,
-            MimeType = request.MimeType,
-            SourceSystem = request.SourceSystem,
-            Partner = request.Partner,
-            OriginalFilename = request.OriginalFilename,
+            FileType = fileType,
+            MimeType = mimeType,
+            SourceSystem = sourceSystem,
+            Partner = partner,
+            OriginalFilename = originalFilename,
 
             SizeBytes = 0,
 
@@ -73,7 +118,7 @@ public sealed class ArchiveService : IArchiveService
             ArchiveStatus = ArchiveStatus.Pending,
 
             IsWormProtected = false,
-            CreatedBy = request.CreatedBy
+            CreatedBy = createdBy
         };
 
         AddBusinessReferences(
@@ -85,12 +130,30 @@ public sealed class ArchiveService : IArchiveService
         {
             EventType = ArchiveEventType.Created,
             EventTimestamp = now,
-            Actor = request.CreatedBy
+            Actor = createdBy
         });
 
         _dbContext.ArchiveObjects.Add(archiveObject);
 
-        await _dbContext.SaveChangesAsync(cancellationToken);
+        try
+        {
+            await _dbContext.SaveChangesAsync(cancellationToken);
+        }
+        catch (OperationCanceledException)
+            when (cancellationToken.IsCancellationRequested)
+        {
+            throw;
+        }
+        catch (Exception exception)
+        {
+            _logger.LogError(
+                exception,
+                "Creating the pending archive record failed.");
+
+            throw new ArchiveException(
+                "Creating the pending archive record failed.",
+                exception);
+        }
 
         try
         {
@@ -128,9 +191,8 @@ public sealed class ArchiveService : IArchiveService
             await _dbContext.SaveChangesAsync(cancellationToken);
 
             _logger.LogInformation(
-                "Archive object {ArchiveObjectId} was stored as {ObjectKey}.",
-                archiveObject.ArchiveObjectId,
-                archiveObject.ObjectKey);
+                "Archive object {ArchiveObjectId} was stored successfully.",
+                archiveObject.ArchiveObjectId);
 
             return new ArchiveFileResult(
                 archiveObject.ArchiveObjectId,
@@ -146,22 +208,34 @@ public sealed class ArchiveService : IArchiveService
                 archiveObject,
                 "UPLOAD_CANCELLED",
                 "The archive operation was cancelled.",
-                request.CreatedBy);
+                createdBy);
 
             throw;
         }
         catch (Exception exception)
         {
-            _logger.LogError(
-                exception,
-                "Archiving object {ArchiveObjectId} failed.",
-                archiveObject.ArchiveObjectId);
+            if (exception is ObjectStorageException)
+            {
+                _logger.LogError(
+                    "Object storage failed while archiving object {ArchiveObjectId} " +
+                    "at {BucketName}/{ObjectKey}.",
+                    archiveObject.ArchiveObjectId,
+                    archiveObject.BucketName,
+                    archiveObject.ObjectKey);
+            }
+            else
+            {
+                _logger.LogError(
+                    exception,
+                    "Finalizing archive object {ArchiveObjectId} failed.",
+                    archiveObject.ArchiveObjectId);
+            }
 
             await MarkAsErrorBestEffortAsync(
                 archiveObject,
                 "ARCHIVE_FAILED",
-                exception.Message,
-                request.CreatedBy);
+                "The archive content could not be stored or finalized.",
+                createdBy);
 
             throw new ArchiveException(
                 $"Archiving object {archiveObject.ArchiveObjectId} failed.",
@@ -175,7 +249,10 @@ public sealed class ArchiveService : IArchiveService
         CancellationToken cancellationToken = default)
     {
         ValidateArchiveObjectId(archiveObjectId);
-        ArgumentException.ThrowIfNullOrWhiteSpace(actor);
+        string normalizedActor = NormalizeRequiredValue(
+            actor,
+            nameof(actor),
+            MaximumActorLength);
 
         ArchiveObject archiveObject =
             await GetActiveArchiveObjectAsync(
@@ -199,13 +276,22 @@ public sealed class ArchiveService : IArchiveService
         catch (Exception exception)
         {
             _logger.LogError(
-                exception,
-                "Opening archive object {ArchiveObjectId} from object storage failed.",
-                archiveObjectId);
+                "Opening archive object {ArchiveObjectId} from object storage failed " +
+                "at {BucketName}/{ObjectKey} with error type {StorageErrorType}.",
+                archiveObjectId,
+                archiveObject.BucketName,
+                archiveObject.ObjectKey,
+                exception.GetType().Name);
 
             throw new ArchiveException(
                 $"Opening archive object {archiveObjectId} failed.",
                 exception);
+        }
+
+        if (content is null)
+        {
+            throw new ArchiveException(
+                $"Object storage returned no stream for archive object {archiveObjectId}.");
         }
 
         if (!content.CanRead)
@@ -221,23 +307,36 @@ public sealed class ArchiveService : IArchiveService
         {
             EventType = ArchiveEventType.Downloaded,
             EventTimestamp = DateTimeOffset.UtcNow,
-            Actor = actor
+            Actor = normalizedActor
         });
 
         try
         {
             await _dbContext.SaveChangesAsync(cancellationToken);
         }
-        catch
+        catch (OperationCanceledException)
+            when (cancellationToken.IsCancellationRequested)
         {
             await content.DisposeAsync();
             throw;
         }
+        catch (Exception exception)
+        {
+            await content.DisposeAsync();
+
+            _logger.LogError(
+                exception,
+                "Recording the download event for archive object {ArchiveObjectId} failed.",
+                archiveObjectId);
+
+            throw new ArchiveException(
+                $"Opening archive object {archiveObjectId} for download failed.",
+                exception);
+        }
 
         _logger.LogInformation(
-            "Archive object {ArchiveObjectId} was opened for download by {Actor}.",
-            archiveObjectId,
-            actor);
+            "Archive object {ArchiveObjectId} was opened for download.",
+            archiveObjectId);
 
         return new ArchiveDownloadResult(
             archiveObject.ArchiveObjectId,
@@ -332,8 +431,7 @@ public sealed class ArchiveService : IArchiveService
             : checked((int)Math.Ceiling(
                 totalCount / (double)request.PageSize));
 
-        int skip = checked(
-            (request.PageNumber - 1) * request.PageSize);
+        int skip = (request.PageNumber - 1) * request.PageSize;
 
         ArchiveSearchItem[] items =
             await query
@@ -386,122 +484,196 @@ public sealed class ArchiveService : IArchiveService
         CancellationToken cancellationToken = default)
     {
         ValidateArchiveObjectId(archiveObjectId);
-        ArgumentException.ThrowIfNullOrWhiteSpace(actor);
+        string normalizedActor = NormalizeRequiredValue(
+            actor,
+            nameof(actor),
+            MaximumActorLength);
 
         ArchiveObject archiveObject =
             await GetActiveArchiveObjectAsync(
                 archiveObjectId,
                 cancellationToken);
 
-        await using Stream content =
-            await _objectStorage.OpenReadAsync(
+        Stream content;
+
+        try
+        {
+            content = await _objectStorage.OpenReadAsync(
                 archiveObject.BucketName,
                 archiveObject.ObjectKey,
                 cancellationToken);
+        }
+        catch (OperationCanceledException)
+            when (cancellationToken.IsCancellationRequested)
+        {
+            throw;
+        }
+        catch (Exception exception)
+        {
+            _logger.LogError(
+                "Opening archive object {ArchiveObjectId} for integrity verification " +
+                "failed at {BucketName}/{ObjectKey} with error type {StorageErrorType}.",
+                archiveObjectId,
+                archiveObject.BucketName,
+                archiveObject.ObjectKey,
+                exception.GetType().Name);
 
-        if (!content.CanRead)
+            throw new ArchiveException(
+                $"Opening archive object {archiveObjectId} for integrity verification failed.",
+                exception);
+        }
+
+        if (content is null)
         {
             throw new ArchiveException(
-                $"The storage stream for archive object " +
-                $"{archiveObjectId} is not readable.");
+                $"Object storage returned no stream for archive object {archiveObjectId}.");
         }
 
-        var buffer = new byte[128 * 1024];
-
-        using IncrementalHash hash =
-            IncrementalHash.CreateHash(
-                HashAlgorithmName.SHA256);
-
-        long actualSizeBytes = 0;
-
-        while (true)
+        await using (content)
         {
-            int bytesRead = await content.ReadAsync(
-                buffer.AsMemory(),
-                cancellationToken);
 
-            if (bytesRead == 0)
+            if (!content.CanRead)
             {
-                break;
+                throw new ArchiveException(
+                    $"The storage stream for archive object " +
+                    $"{archiveObjectId} is not readable.");
             }
 
-            hash.AppendData(
-                buffer,
-                0,
-                bytesRead);
+            var buffer = new byte[128 * 1024];
 
-            actualSizeBytes += bytesRead;
-        }
+            using IncrementalHash hash =
+                IncrementalHash.CreateHash(
+                    HashAlgorithmName.SHA256);
 
-        string actualSha256Hash =
-            Convert.ToHexString(hash.GetHashAndReset())
-                .ToLowerInvariant();
+            long actualSizeBytes = 0;
 
-        string expectedSha256Hash =
-            archiveObject.Sha256Hash!;
+            try
+            {
+                while (true)
+                {
+                    int bytesRead = await content.ReadAsync(
+                        buffer.AsMemory(),
+                        cancellationToken);
 
-        bool hashMatches =
+                    if (bytesRead == 0)
+                    {
+                        break;
+                    }
+
+                    hash.AppendData(
+                        buffer,
+                        0,
+                        bytesRead);
+
+                    actualSizeBytes = checked(actualSizeBytes + bytesRead);
+                }
+            }
+            catch (OperationCanceledException)
+                when (cancellationToken.IsCancellationRequested)
+            {
+                throw;
+            }
+            catch (Exception exception)
+            {
+                _logger.LogError(
+                    "Reading archive object {ArchiveObjectId} for integrity verification " +
+                    "failed at {BucketName}/{ObjectKey} with error type {StorageErrorType}.",
+                    archiveObjectId,
+                    archiveObject.BucketName,
+                    archiveObject.ObjectKey,
+                    exception.GetType().Name);
+
+                throw new ArchiveException(
+                    $"Reading archive object {archiveObjectId} for integrity verification failed.",
+                    exception);
+            }
+
+            string actualSha256Hash =
+                Convert.ToHexString(hash.GetHashAndReset())
+                    .ToLowerInvariant();
+
+            string expectedSha256Hash =
+                archiveObject.Sha256Hash!;
+
+            bool hashMatches =
             string.Equals(
                 expectedSha256Hash,
                 actualSha256Hash,
                 StringComparison.OrdinalIgnoreCase);
 
-        bool sizeMatches =
+            bool sizeMatches =
             archiveObject.SizeBytes == actualSizeBytes;
 
-        bool isValid =
+            bool isValid =
             hashMatches && sizeMatches;
 
-        DateTimeOffset verifiedAt =
+            DateTimeOffset verifiedAt =
             DateTimeOffset.UtcNow;
 
-        archiveObject.Events.Add(new ArchiveEvent
-        {
-            EventType = isValid
+            archiveObject.Events.Add(new ArchiveEvent
+            {
+                EventType = isValid
                 ? ArchiveEventType.IntegrityVerified
                 : ArchiveEventType.IntegrityCheckFailed,
 
-            EventTimestamp = verifiedAt,
-            Actor = actor,
+                EventTimestamp = verifiedAt,
+                Actor = normalizedActor,
 
-            DetailsJson = CreateIntegrityDetails(
+                DetailsJson = CreateIntegrityDetails(
                 expectedSha256Hash,
                 actualSha256Hash,
                 archiveObject.SizeBytes,
                 actualSizeBytes,
                 hashMatches,
                 sizeMatches)
-        });
+            });
 
-        await _dbContext.SaveChangesAsync(cancellationToken);
+            try
+            {
+                await _dbContext.SaveChangesAsync(cancellationToken);
+            }
+            catch (OperationCanceledException)
+                when (cancellationToken.IsCancellationRequested)
+            {
+                throw;
+            }
+            catch (Exception exception)
+            {
+                _logger.LogError(
+                    exception,
+                    "Recording the integrity result for archive object {ArchiveObjectId} failed.",
+                    archiveObjectId);
 
-        if (isValid)
-        {
-            _logger.LogInformation(
-                "Integrity of archive object {ArchiveObjectId} was verified.",
-                archiveObjectId);
-        }
-        else
-        {
-            _logger.LogError(
-                "Integrity verification of archive object {ArchiveObjectId} failed. " +
-                "Expected hash {ExpectedHash}, actual hash {ActualHash}, " +
-                "expected size {ExpectedSize}, actual size {ActualSize}.",
-                archiveObjectId,
+                throw new ArchiveException(
+                    $"Recording the integrity result for archive object {archiveObjectId} failed.",
+                    exception);
+            }
+
+            if (isValid)
+            {
+                _logger.LogInformation(
+                    "Integrity of archive object {ArchiveObjectId} was verified.",
+                    archiveObjectId);
+            }
+            else
+            {
+                _logger.LogError(
+                    "Integrity verification of archive object {ArchiveObjectId} failed. " +
+                    "Hash matched: {HashMatches}; size matched: {SizeMatches}.",
+                    archiveObjectId,
+                    hashMatches,
+                    sizeMatches);
+            }
+
+            return new ArchiveIntegrityResult(
+                archiveObject.ArchiveObjectId,
+                isValid,
                 expectedSha256Hash,
                 actualSha256Hash,
                 archiveObject.SizeBytes,
-                actualSizeBytes);
+                actualSizeBytes,
+                verifiedAt);
         }
-
-        return new ArchiveIntegrityResult(
-            archiveObject.ArchiveObjectId,
-            isValid,
-            expectedSha256Hash,
-            actualSha256Hash,
-            archiveObject.SizeBytes,
-            actualSizeBytes,
-            verifiedAt);
     }
 
     public async Task<ArchiveIntegrityStatusResult?> GetIntegrityStatusAsync(
@@ -562,138 +734,182 @@ public sealed class ArchiveService : IArchiveService
         CancellationToken cancellationToken = default)
     {
         ValidateArchiveObjectId(archiveObjectId);
-        ArgumentException.ThrowIfNullOrWhiteSpace(actor);
-
-        string normalizedActor = actor.Trim();
+        string normalizedActor = NormalizeRequiredValue(
+            actor,
+            nameof(actor),
+            MaximumActorLength);
 
         var executionStrategy =
             _dbContext.Database.CreateExecutionStrategy();
 
-        return await executionStrategy.ExecuteAsync(
-            async () =>
-            {
-                _dbContext.ChangeTracker.Clear();
+        try
+        {
+            return await executionStrategy.ExecuteAsync(
+                async () =>
+                {
+                    _dbContext.ChangeTracker.Clear();
 
-                await using var transaction =
-                    await _dbContext.Database.BeginTransactionAsync(
-                        cancellationToken);
+                    await using var transaction =
+                        await _dbContext.Database.BeginTransactionAsync(
+                            cancellationToken);
 
-                ArchiveObject? archiveObject =
-                    await _dbContext.ArchiveObjects
-                        .FromSqlInterpolated(
-                            $"""
+                    ArchiveObject? archiveObject =
+                        await _dbContext.ArchiveObjects
+                            .FromSqlInterpolated(
+                                $"""
                             SELECT *
                             FROM cirrus.archive_object
                             WHERE archive_object_id = {archiveObjectId}
                             FOR UPDATE
                             """)
-                        .SingleOrDefaultAsync(cancellationToken);
+                            .SingleOrDefaultAsync(cancellationToken);
 
-                if (archiveObject is null)
-                {
-                    throw new ArchiveObjectNotFoundException(
-                        archiveObjectId);
-                }
+                    if (archiveObject is null)
+                    {
+                        throw new ArchiveObjectNotFoundException(
+                            archiveObjectId);
+                    }
 
-                ArchiveDeletionRequestResult result;
+                    ArchiveDeletionRequestResult result;
 
-                switch (archiveObject.ArchiveStatus)
-                {
-                    case ArchiveStatus.Active:
-                        {
-                            DateTimeOffset requestedAt =
-                            DateTimeOffset.UtcNow;
-
-                            archiveObject.ArchiveStatus =
-                            ArchiveStatus.DeletionRequested;
-
-                            archiveObject.DeletionRequestedAt =
-                            requestedAt;
-
-                            archiveObject.DeletionRequestedBy =
-                            normalizedActor;
-
-                            archiveObject.Events.Add(
-                            new ArchiveEvent
+                    switch (archiveObject.ArchiveStatus)
+                    {
+                        case ArchiveStatus.Active:
                             {
-                                EventType =
-                                    ArchiveEventType.DeletionRequested,
+                                DateTimeOffset requestedAt =
+                                DateTimeOffset.UtcNow;
 
-                                EventTimestamp =
-                                    requestedAt,
+                                archiveObject.ArchiveStatus =
+                                ArchiveStatus.DeletionRequested;
 
-                                Actor =
-                                    normalizedActor,
+                                archiveObject.DeletionRequestedAt =
+                                requestedAt;
 
-                                DetailsJson =
-                                    CreateDeletionRequestedDetails(
-                                        archiveObject)
-                            });
+                                archiveObject.DeletionRequestedBy =
+                                normalizedActor;
 
-                            await _dbContext.SaveChangesAsync(
-                            cancellationToken);
+                                archiveObject.Events.Add(
+                                new ArchiveEvent
+                                {
+                                    EventType =
+                                        ArchiveEventType.DeletionRequested,
 
-                            result = new ArchiveDeletionRequestResult(
-                            archiveObject.ArchiveObjectId,
-                            archiveObject.ArchiveStatus,
-                            archiveObject.DeletionRequestedAt,
-                            archiveObject.DeletionRequestedBy,
-                            archiveObject.PurgedAt,
-                            StateChanged: true);
+                                    EventTimestamp =
+                                        requestedAt,
 
-                            break;
-                        }
+                                    Actor =
+                                        normalizedActor,
 
-                    case ArchiveStatus.DeletionRequested:
-                        {
-                            result = new ArchiveDeletionRequestResult(
-                            archiveObject.ArchiveObjectId,
-                            archiveObject.ArchiveStatus,
-                            archiveObject.DeletionRequestedAt,
-                            archiveObject.DeletionRequestedBy,
-                            archiveObject.PurgedAt,
-                            StateChanged: false);
+                                    DetailsJson =
+                                        CreateDeletionRequestedDetails(
+                                            archiveObject)
+                                });
 
-                            break;
-                        }
+                                await _dbContext.SaveChangesAsync(
+                                cancellationToken);
 
-                    case ArchiveStatus.Purged:
-                        {
-                            result = new ArchiveDeletionRequestResult(
-                            archiveObject.ArchiveObjectId,
-                            archiveObject.ArchiveStatus,
-                            archiveObject.DeletionRequestedAt,
-                            archiveObject.DeletionRequestedBy,
-                            archiveObject.PurgedAt,
-                            StateChanged: false);
+                                result = new ArchiveDeletionRequestResult(
+                                archiveObject.ArchiveObjectId,
+                                archiveObject.ArchiveStatus,
+                                archiveObject.DeletionRequestedAt,
+                                archiveObject.DeletionRequestedBy,
+                                archiveObject.PurgedAt,
+                                StateChanged: true);
 
-                            break;
-                        }
+                                break;
+                            }
 
-                    case ArchiveStatus.Pending:
-                    case ArchiveStatus.Error:
-                    default:
-                        throw new ArchiveObjectUnavailableException(
-                            archiveObjectId,
-                            archiveObject.ArchiveStatus);
-                }
+                        case ArchiveStatus.DeletionRequested:
+                            {
+                                result = new ArchiveDeletionRequestResult(
+                                archiveObject.ArchiveObjectId,
+                                archiveObject.ArchiveStatus,
+                                archiveObject.DeletionRequestedAt,
+                                archiveObject.DeletionRequestedBy,
+                                archiveObject.PurgedAt,
+                                StateChanged: false);
 
-                await transaction.CommitAsync(
-                    cancellationToken);
+                                break;
+                            }
 
-                return result;
-            });
+                        case ArchiveStatus.Purged:
+                            {
+                                result = new ArchiveDeletionRequestResult(
+                                archiveObject.ArchiveObjectId,
+                                archiveObject.ArchiveStatus,
+                                archiveObject.DeletionRequestedAt,
+                                archiveObject.DeletionRequestedBy,
+                                archiveObject.PurgedAt,
+                                StateChanged: false);
+
+                                break;
+                            }
+
+                        case ArchiveStatus.Pending:
+                        case ArchiveStatus.Error:
+                        default:
+                            throw new ArchiveObjectUnavailableException(
+                                archiveObjectId,
+                                archiveObject.ArchiveStatus);
+                    }
+
+                    await transaction.CommitAsync(
+                        cancellationToken);
+
+                    return result;
+                });
+        }
+        catch (OperationCanceledException)
+            when (cancellationToken.IsCancellationRequested)
+        {
+            throw;
+        }
+        catch (ArchiveException)
+        {
+            throw;
+        }
+        catch (Exception exception)
+        {
+            _logger.LogError(
+                exception,
+                "Requesting deletion of archive object {ArchiveObjectId} failed.",
+                archiveObjectId);
+
+            throw new ArchiveException(
+                $"Requesting deletion of archive object {archiveObjectId} failed.",
+                exception);
+        }
     }
 
     private async Task<ArchiveObject> GetActiveArchiveObjectAsync(
         long archiveObjectId,
         CancellationToken cancellationToken)
     {
-        ArchiveObject? archiveObject =
-            await _dbContext.ArchiveObjects
+        ArchiveObject? archiveObject;
+
+        try
+        {
+            archiveObject = await _dbContext.ArchiveObjects
                 .SingleOrDefaultAsync(
                     x => x.ArchiveObjectId == archiveObjectId,
                     cancellationToken);
+        }
+        catch (OperationCanceledException)
+            when (cancellationToken.IsCancellationRequested)
+        {
+            throw;
+        }
+        catch (Exception exception)
+        {
+            _logger.LogError(
+                exception,
+                "Loading archive object {ArchiveObjectId} failed.",
+                archiveObjectId);
+
+            throw new ArchiveException(
+                $"Loading archive object {archiveObjectId} failed.",
+                exception);
+        }
 
         if (archiveObject is null)
         {
@@ -729,15 +945,6 @@ public sealed class ArchiveService : IArchiveService
                 request.ArchiveObjectId.Value);
         }
 
-        if (!string.IsNullOrWhiteSpace(request.Tenant))
-        {
-            string tenant = request.Tenant.Trim();
-
-            query = query.Where(x =>
-                x.BusinessReferences.Any(reference =>
-                    reference.Tenant == tenant));
-        }
-
         if (!string.IsNullOrWhiteSpace(request.FileType))
         {
             string fileType = request.FileType.Trim();
@@ -769,11 +976,14 @@ public sealed class ArchiveService : IArchiveService
         {
             string originalFilename =
                 request.OriginalFilename.Trim();
+            string escapedOriginalFilename =
+                EscapeLikePattern(originalFilename);
 
             query = query.Where(x =>
                 EF.Functions.ILike(
                     x.OriginalFilename,
-                    $"%{originalFilename}%"));
+                    $"%{escapedOriginalFilename}%",
+                    "\\"));
         }
 
         if (!string.IsNullOrWhiteSpace(
@@ -831,39 +1041,30 @@ public sealed class ArchiveService : IArchiveService
                 request.ArchivedUntil.Value);
         }
 
-        if (request.BusinessReferenceTypeId is not null)
+        bool hasBusinessReferenceFilter =
+            !string.IsNullOrWhiteSpace(request.Tenant)
+            || request.BusinessReferenceTypeId is not null
+            || !string.IsNullOrWhiteSpace(request.BusinessReferenceValue)
+            || !string.IsNullOrWhiteSpace(request.BusinessType);
+
+        if (hasBusinessReferenceFilter)
         {
-            int referenceTypeId =
-                request.BusinessReferenceTypeId.Value;
+            string? tenant = NormalizeOptionalValue(request.Tenant);
+            int? referenceTypeId = request.BusinessReferenceTypeId;
+            string? referenceValue =
+                NormalizeOptionalValue(request.BusinessReferenceValue);
+            string? businessType =
+                NormalizeOptionalValue(request.BusinessType);
 
             query = query.Where(x =>
                 x.BusinessReferences.Any(reference =>
-                    reference.BusinessReferenceTypeId ==
-                    referenceTypeId));
-        }
-
-        if (!string.IsNullOrWhiteSpace(
-                request.BusinessReferenceValue))
-        {
-            string referenceValue =
-                request.BusinessReferenceValue.Trim();
-
-            query = query.Where(x =>
-                x.BusinessReferences.Any(reference =>
-                    reference.ReferenceValue ==
-                    referenceValue));
-        }
-
-        if (!string.IsNullOrWhiteSpace(
-                request.BusinessType))
-        {
-            string businessType =
-                request.BusinessType.Trim();
-
-            query = query.Where(x =>
-                x.BusinessReferences.Any(reference =>
-                    reference.BusinessType ==
-                    businessType));
+                    (tenant == null || reference.Tenant == tenant)
+                    && (referenceTypeId == null
+                        || reference.BusinessReferenceTypeId == referenceTypeId)
+                    && (referenceValue == null
+                        || reference.ReferenceValue == referenceValue)
+                    && (businessType == null
+                        || reference.BusinessType == businessType)));
         }
 
         return query;
@@ -873,36 +1074,38 @@ public sealed class ArchiveService : IArchiveService
         ArchiveFileRequest request,
         CancellationToken cancellationToken)
     {
+        RetentionPolicy? policy = null;
+
+        if (request.RetentionPolicyId is not null)
+        {
+            policy = await _dbContext.RetentionPolicies
+                .AsNoTracking()
+                .SingleOrDefaultAsync(
+                    x => x.RetentionPolicyId == request.RetentionPolicyId.Value,
+                    cancellationToken);
+
+            if (policy is null)
+            {
+                throw new ArgumentException(
+                    $"Retention policy {request.RetentionPolicyId} does not exist.",
+                    nameof(request));
+            }
+        }
+
         if (request.RetentionUntil is not null)
         {
             return request.RetentionUntil.Value;
         }
 
-        if (request.RetentionPolicyId is null)
+        DateTime retentionBase = request.ReceivedAt.UtcDateTime;
+
+        if (policy!.RetentionYears > DateTime.MaxValue.Year - retentionBase.Year)
         {
-            throw new ArgumentException(
-                "Either RetentionUntil or RetentionPolicyId must be supplied.",
-                nameof(request));
+            throw new ArchiveException(
+                $"Retention policy {policy.RetentionPolicyId} exceeds the supported date range.");
         }
 
-        RetentionPolicy? policy =
-            await _dbContext.RetentionPolicies
-                .AsNoTracking()
-                .SingleOrDefaultAsync(
-                    x => x.RetentionPolicyId ==
-                         request.RetentionPolicyId.Value,
-                    cancellationToken);
-
-        if (policy is null)
-        {
-            throw new ArgumentException(
-                $"Retention policy {request.RetentionPolicyId} does not exist.",
-                nameof(request));
-        }
-
-        DateTime retentionBase =
-            request.ReceivedAt.UtcDateTime.AddYears(
-                policy.RetentionYears);
+        retentionBase = retentionBase.AddYears(policy.RetentionYears);
 
         return DateOnly.FromDateTime(retentionBase);
     }
@@ -921,13 +1124,13 @@ public sealed class ArchiveService : IArchiveService
                         reference.BusinessReferenceTypeId,
 
                     ReferenceValue =
-                        reference.ReferenceValue,
+                        reference.ReferenceValue.Trim(),
 
                     BusinessType =
-                        reference.BusinessType,
+                        reference.BusinessType.Trim(),
 
                     Tenant =
-                        reference.Tenant,
+                        reference.Tenant.Trim(),
 
                     CreatedAt = createdAt
                 });
@@ -951,16 +1154,7 @@ public sealed class ArchiveService : IArchiveService
                         archiveObject.RetentionUntil,
 
                     isWormProtected =
-                        archiveObject.IsWormProtected,
-
-                    bucketName =
-                        archiveObject.BucketName,
-
-                    objectKey =
-                        archiveObject.ObjectKey,
-
-                    storageVersionId =
-                        archiveObject.StorageVersionId
+                        archiveObject.IsWormProtected
                 }));
     }
 
@@ -993,22 +1187,64 @@ public sealed class ArchiveService : IArchiveService
             objectId);
     }
 
+    private async Task ValidateBusinessReferenceTypesAsync(
+        IReadOnlyCollection<ArchiveBusinessReferenceInput> references,
+        CancellationToken cancellationToken)
+    {
+        int[] requestedTypeIds = references
+            .Select(reference => reference.BusinessReferenceTypeId)
+            .Distinct()
+            .ToArray();
+
+        if (requestedTypeIds.Length == 0)
+        {
+            return;
+        }
+
+        int[] existingTypeIds = await _dbContext.BusinessReferenceTypes
+            .AsNoTracking()
+            .Where(type => requestedTypeIds.Contains(type.BusinessReferenceTypeId))
+            .Select(type => type.BusinessReferenceTypeId)
+            .ToArrayAsync(cancellationToken);
+
+        int[] missingTypeIds = requestedTypeIds
+            .Except(existingTypeIds)
+            .OrderBy(id => id)
+            .ToArray();
+
+        if (missingTypeIds.Length > 0)
+        {
+            throw new ArgumentException(
+                $"Business reference types do not exist: {string.Join(", ", missingTypeIds)}.",
+                nameof(references));
+        }
+    }
+
     private static string SanitizePathSegment(
         string value)
     {
         char[] characters = value
             .Where(character =>
-                char.IsLetterOrDigit(character) ||
-                character is '-' or '_')
+                character is >= 'a' and <= 'z'
+                or >= '0' and <= '9'
+                or '-' or '_')
             .ToArray();
 
         if (characters.Length == 0)
         {
             throw new ArgumentException(
-                $"The value '{value}' cannot be used in an object key.");
+                "The value cannot be represented safely in an object key.");
         }
 
         return new string(characters);
+    }
+
+    private static string EscapeLikePattern(string value)
+    {
+        return value
+            .Replace("\\", "\\\\", StringComparison.Ordinal)
+            .Replace("%", "\\%", StringComparison.Ordinal)
+            .Replace("_", "\\_", StringComparison.Ordinal);
     }
 
     private async Task MarkAsErrorBestEffortAsync(
@@ -1019,6 +1255,9 @@ public sealed class ArchiveService : IArchiveService
     {
         try
         {
+            using var persistenceTimeout =
+                new CancellationTokenSource(TimeSpan.FromSeconds(10));
+
             archiveObject.ArchiveStatus =
                 ArchiveStatus.Error;
 
@@ -1046,7 +1285,7 @@ public sealed class ArchiveService : IArchiveService
                 });
 
             await _dbContext.SaveChangesAsync(
-                CancellationToken.None);
+                persistenceTimeout.Token);
         }
         catch (Exception exception)
         {
@@ -1091,20 +1330,135 @@ public sealed class ArchiveService : IArchiveService
                 nameof(request));
         }
 
-        ArgumentException.ThrowIfNullOrWhiteSpace(
-            request.OriginalFilename);
+        NormalizeRequiredValue(
+            request.OriginalFilename,
+            nameof(request.OriginalFilename),
+            MaximumOriginalFilenameLength);
 
-        ArgumentException.ThrowIfNullOrWhiteSpace(
-            request.FileType);
+        if (request.OriginalFilename.IndexOfAny(['/', '\\']) >= 0)
+        {
+            throw new ArgumentException(
+                "OriginalFilename must not contain path separators.",
+                nameof(request));
+        }
+        NormalizeRequiredValue(
+            request.FileType,
+            nameof(request.FileType),
+            MaximumFileTypeLength);
+        ValidateOptionalValue(
+            request.MimeType,
+            nameof(request.MimeType),
+            MaximumMimeTypeLength);
+        NormalizeRequiredValue(
+            request.SourceSystem,
+            nameof(request.SourceSystem),
+            MaximumSourceSystemLength);
+        ValidateOptionalValue(
+            request.Partner,
+            nameof(request.Partner),
+            MaximumPartnerLength);
+        NormalizeRequiredValue(
+            request.Tenant,
+            nameof(request.Tenant),
+            MaximumTenantLength);
+        NormalizeRequiredValue(
+            request.CreatedBy,
+            nameof(request.CreatedBy),
+            MaximumCreatedByLength);
 
-        ArgumentException.ThrowIfNullOrWhiteSpace(
-            request.SourceSystem);
+        if (request.RetentionUntil is null
+            && request.RetentionPolicyId is null)
+        {
+            throw new ArgumentException(
+                "Either RetentionUntil or RetentionPolicyId must be supplied.",
+                nameof(request));
+        }
 
-        ArgumentException.ThrowIfNullOrWhiteSpace(
-            request.Tenant);
+        if (request.RetentionPolicyId <= 0)
+        {
+            throw new ArgumentOutOfRangeException(
+                nameof(request),
+                request.RetentionPolicyId,
+                "RetentionPolicyId must be greater than zero.");
+        }
 
-        ArgumentException.ThrowIfNullOrWhiteSpace(
-            request.CreatedBy);
+        if (request.ReceivedAt == default)
+        {
+            throw new ArgumentException(
+                "ReceivedAt must be supplied.",
+                nameof(request));
+        }
+
+        if (request.RetentionUntil is not null
+            && request.RetentionUntil < DateOnly.FromDateTime(request.ReceivedAt.UtcDateTime))
+        {
+            throw new ArgumentException(
+                "RetentionUntil must not be earlier than ReceivedAt.",
+                nameof(request));
+        }
+
+        if (request.BusinessReferences is null)
+        {
+            throw new ArgumentException(
+                "BusinessReferences must not be null.",
+                nameof(request));
+        }
+
+        if (request.BusinessReferences.Count > MaximumBusinessReferences)
+        {
+            throw new ArgumentException(
+                $"BusinessReferences must not contain more than {MaximumBusinessReferences} entries.",
+                nameof(request));
+        }
+
+        foreach (ArchiveBusinessReferenceInput reference in
+                 request.BusinessReferences)
+        {
+            if (reference is null)
+            {
+                throw new ArgumentException(
+                    "BusinessReferences must not contain null entries.",
+                    nameof(request));
+            }
+
+            if (reference.BusinessReferenceTypeId <= 0)
+            {
+                throw new ArgumentOutOfRangeException(
+                    nameof(request),
+                    reference.BusinessReferenceTypeId,
+                    "BusinessReferenceTypeId must be greater than zero.");
+            }
+
+            NormalizeRequiredValue(
+                reference.ReferenceValue,
+                nameof(reference.ReferenceValue),
+                MaximumBusinessReferenceValueLength);
+            NormalizeRequiredValue(
+                reference.BusinessType,
+                nameof(reference.BusinessType),
+                MaximumBusinessTypeLength);
+            NormalizeRequiredValue(
+                reference.Tenant,
+                nameof(reference.Tenant),
+                MaximumTenantLength);
+        }
+
+        var duplicateReference = request.BusinessReferences
+            .GroupBy(reference => new
+            {
+                reference.BusinessReferenceTypeId,
+                ReferenceValue = reference.ReferenceValue.Trim(),
+                BusinessType = reference.BusinessType.Trim(),
+                Tenant = reference.Tenant.Trim()
+            })
+            .FirstOrDefault(group => group.Count() > 1);
+
+        if (duplicateReference is not null)
+        {
+            throw new ArgumentException(
+                "BusinessReferences must not contain duplicate entries.",
+                nameof(request));
+        }
     }
 
     private static void ValidateSearchRequest(
@@ -1128,6 +1482,38 @@ public sealed class ArchiveService : IArchiveService
                 request.PageSize,
                 $"PageSize must be between 1 and {MaximumPageSize}.");
         }
+
+        if (request.PageNumber > ((int.MaxValue - 1) / request.PageSize) + 1)
+        {
+            throw new ArgumentOutOfRangeException(
+                nameof(request),
+                request.PageNumber,
+                "The requested page exceeds the supported pagination range.");
+        }
+
+        if (request.ArchiveObjectId <= 0)
+        {
+            throw new ArgumentOutOfRangeException(
+                nameof(request),
+                request.ArchiveObjectId,
+                "ArchiveObjectId must be greater than zero.");
+        }
+
+        if (request.BusinessReferenceTypeId <= 0)
+        {
+            throw new ArgumentOutOfRangeException(
+                nameof(request),
+                request.BusinessReferenceTypeId,
+                "BusinessReferenceTypeId must be greater than zero.");
+        }
+
+        ValidateOptionalValue(request.Tenant, nameof(request.Tenant), MaximumTenantLength);
+        ValidateOptionalValue(request.FileType, nameof(request.FileType), MaximumFileTypeLength);
+        ValidateOptionalValue(request.SourceSystem, nameof(request.SourceSystem), MaximumSourceSystemLength);
+        ValidateOptionalValue(request.Partner, nameof(request.Partner), MaximumPartnerLength);
+        ValidateOptionalValue(request.OriginalFilename, nameof(request.OriginalFilename), MaximumOriginalFilenameLength);
+        ValidateOptionalValue(request.BusinessReferenceValue, nameof(request.BusinessReferenceValue), MaximumBusinessReferenceValueLength);
+        ValidateOptionalValue(request.BusinessType, nameof(request.BusinessType), MaximumBusinessTypeLength);
 
         if (request.ReceivedFrom is not null &&
             request.ReceivedUntil is not null &&
@@ -1173,6 +1559,66 @@ public sealed class ArchiveService : IArchiveService
                 nameof(archiveObjectId),
                 archiveObjectId,
                 "ArchiveObjectId must be greater than zero.");
+        }
+    }
+
+    private static string NormalizeRequiredValue(
+        string? value,
+        string parameterName,
+        int maximumLength)
+    {
+        if (string.IsNullOrWhiteSpace(value))
+        {
+            throw new ArgumentException(
+                "The value must not be empty or whitespace.",
+                parameterName);
+        }
+
+        string normalized = value.Trim();
+
+        if (normalized.Length > maximumLength)
+        {
+            throw new ArgumentException(
+                $"The value must not exceed {maximumLength} characters.",
+                parameterName);
+        }
+
+        if (normalized.Any(char.IsControl))
+        {
+            throw new ArgumentException(
+                "The value must not contain control characters.",
+                parameterName);
+        }
+
+        return normalized;
+    }
+
+    private static string? NormalizeOptionalValue(string? value)
+    {
+        return string.IsNullOrWhiteSpace(value)
+            ? null
+            : value.Trim();
+    }
+
+    private static void ValidateOptionalValue(
+        string? value,
+        string parameterName,
+        int maximumLength)
+    {
+        string? normalized = NormalizeOptionalValue(value);
+
+        if (normalized?.Length > maximumLength)
+        {
+            throw new ArgumentException(
+                $"The value must not exceed {maximumLength} characters.",
+                parameterName);
+        }
+
+        if (normalized?.Any(char.IsControl) == true)
+        {
+            throw new ArgumentException(
+                "The value must not contain control characters.",
+                parameterName);
         }
     }
 }

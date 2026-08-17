@@ -54,6 +54,30 @@ public static class DependencyInjection
                     !string.IsNullOrWhiteSpace(
                         options.BucketName),
                 "Archive bucket name is required.")
+            .Validate(
+                options => options.BucketName is null
+                    || options.BucketName.Trim().Length <= 255,
+                "Archive bucket name must not exceed 255 characters.")
+            .Validate(
+                options => options.BucketName is null
+                    || options.BucketName.All(character => !char.IsControl(character)),
+                "Archive bucket name must not contain control characters.")
+            .Validate(
+                options => !string.IsNullOrWhiteSpace(
+                    options.ObjectKeyPrefix?.Trim('/')),
+                "Archive object-key prefix is required.")
+            .Validate(
+                options => options.ObjectKeyPrefix is null
+                    || options.ObjectKeyPrefix.Trim('/').Length <= 700,
+                "Archive object-key prefix must not exceed 700 characters.")
+            .Validate(
+                options => options.ObjectKeyPrefix is null
+                    || options.ObjectKeyPrefix.All(character =>
+                        character is >= 'a' and <= 'z'
+                        or >= 'A' and <= 'Z'
+                        or >= '0' and <= '9'
+                        or '-' or '_' or '/'),
+                "Archive object-key prefix contains unsupported characters.")
             .ValidateOnStart();
 
         services

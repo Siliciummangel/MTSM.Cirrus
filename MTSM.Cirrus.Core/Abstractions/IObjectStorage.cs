@@ -4,6 +4,10 @@ namespace MTSM.Cirrus.Core.Abstractions;
 
 public interface IObjectStorage
 {
+    /// <summary>
+    /// Writes the stream from its current position through end-of-stream.
+    /// The caller retains ownership of the stream.
+    /// </summary>
     Task<ObjectStorageWriteResult> WriteAsync(
         string bucketName,
         string objectKey,
@@ -11,6 +15,9 @@ public interface IObjectStorage
         string? contentType,
         CancellationToken cancellationToken = default);
 
+    /// <summary>
+    /// Opens a readable stream. The caller owns and must dispose the returned stream.
+    /// </summary>
     Task<Stream> OpenReadAsync(
         string bucketName,
         string objectKey,

@@ -4,6 +4,7 @@ using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using MTSM.Cirrus.Core.Abstractions;
 using MTSM.Cirrus.Core.Config;
+using MTSM.Cirrus.Core.Exceptions;
 using MTSM.Cirrus.Core.Models;
 using System.Net;
 
@@ -57,6 +58,18 @@ public sealed class S3ObjectStorage : IObjectStorage, IDisposable
                 nameof(content));
         }
 
+        string? normalizedContentType = string.IsNullOrWhiteSpace(contentType)
+            ? null
+            : contentType.Trim();
+
+        if (normalizedContentType?.Length > 255
+            || normalizedContentType?.Any(char.IsControl) == true)
+        {
+            throw new ArgumentException(
+                "The content type is invalid.",
+                nameof(contentType));
+        }
+
         await EnsureBucketExistsAsync(bucketName, cancellationToken);
 
         var request = new PutObjectRequest
@@ -68,9 +81,9 @@ public sealed class S3ObjectStorage : IObjectStorage, IDisposable
             UseChunkEncoding = _options.UseChunkEncoding,
             DisableDefaultChecksumValidation =
                 _options.DisableDefaultChecksumValidation,
-            ContentType = string.IsNullOrWhiteSpace(contentType)
+            ContentType = normalizedContentType is null
                 ? "application/octet-stream"
-                : contentType
+                : normalizedContentType
         };
 
         try
@@ -80,11 +93,16 @@ public sealed class S3ObjectStorage : IObjectStorage, IDisposable
                 cancellationToken);
 
             _logger.LogInformation(
-                "Stored S3 object {BucketName}/{ObjectKey} with ETag {ETag} and version {VersionId}.",
+                "Stored an object in S3 bucket {BucketName}.",
+                bucketName);
+
+            _logger.LogDebug(
+                "Stored S3 object {BucketName}/{ObjectKey} with ETag {ETag} " +
+                "and version {VersionId}.",
                 bucketName,
                 objectKey,
-                response.ETag,
-                response.VersionId);
+                NormalizeETag(response.ETag),
+                NormalizeHeaderValue(response.VersionId));
 
             return new ObjectStorageWriteResult(
                 NormalizeHeaderValue(response.VersionId),
@@ -93,11 +111,17 @@ public sealed class S3ObjectStorage : IObjectStorage, IDisposable
         catch (AmazonS3Exception exception)
             when (!cancellationToken.IsCancellationRequested)
         {
+            LogS3Failure("write", exception);
+
             throw CreateStorageException(
                 "write",
-                bucketName,
-                objectKey,
                 exception);
+        }
+        catch (Exception exception)
+            when (!cancellationToken.IsCancellationRequested)
+        {
+            LogUnexpectedStorageFailure("write", exception);
+            throw CreateStorageException("write", exception);
         }
     }
 
@@ -119,6 +143,14 @@ public sealed class S3ObjectStorage : IObjectStorage, IDisposable
                 },
                 cancellationToken);
 
+            if (response.ResponseStream is null)
+            {
+                response.Dispose();
+
+                throw new ObjectStorageException(
+                    "Object storage returned no response stream.");
+            }
+
             // The caller owns and disposes this stream. The AWS response stream
             // keeps the underlying HTTP response alive until it is disposed.
             return response.ResponseStream;
@@ -126,11 +158,17 @@ public sealed class S3ObjectStorage : IObjectStorage, IDisposable
         catch (AmazonS3Exception exception)
             when (!cancellationToken.IsCancellationRequested)
         {
+            LogS3Failure("read", exception);
+
             throw CreateStorageException(
                 "read",
-                bucketName,
-                objectKey,
                 exception);
+        }
+        catch (Exception exception)
+            when (!cancellationToken.IsCancellationRequested)
+        {
+            LogUnexpectedStorageFailure("read", exception);
+            throw CreateStorageException("read", exception);
         }
     }
 
@@ -162,11 +200,17 @@ public sealed class S3ObjectStorage : IObjectStorage, IDisposable
         catch (AmazonS3Exception exception)
             when (!cancellationToken.IsCancellationRequested)
         {
+            LogS3Failure("check existence", exception);
+
             throw CreateStorageException(
                 "check existence of",
-                bucketName,
-                objectKey,
                 exception);
+        }
+        catch (Exception exception)
+            when (!cancellationToken.IsCancellationRequested)
+        {
+            LogUnexpectedStorageFailure("check existence", exception);
+            throw CreateStorageException("check existence of", exception);
         }
     }
 
@@ -224,6 +268,24 @@ public sealed class S3ObjectStorage : IObjectStorage, IDisposable
                 {
                     // Another instance may have created it concurrently.
                 }
+                catch (AmazonS3Exception exception)
+                    when (!cancellationToken.IsCancellationRequested)
+                {
+                    LogS3Failure("create bucket", exception);
+
+                    throw new ObjectStorageException(
+                        "Creating the object-storage bucket failed.",
+                        exception);
+                }
+                catch (Exception exception)
+                    when (!cancellationToken.IsCancellationRequested)
+                {
+                    LogUnexpectedStorageFailure("create bucket", exception);
+
+                    throw new ObjectStorageException(
+                        "Creating the object-storage bucket failed.",
+                        exception);
+                }
             }
 
             lock (_initializedBuckets)
@@ -260,26 +322,54 @@ public sealed class S3ObjectStorage : IObjectStorage, IDisposable
         catch (AmazonS3Exception exception)
             when (!cancellationToken.IsCancellationRequested)
         {
-            throw new InvalidOperationException(
-                $"Checking S3 bucket '{bucketName}' failed " +
-                $"with status {(int)exception.StatusCode} ({exception.StatusCode}) " +
-                $"and error code '{exception.ErrorCode}'.",
+            LogS3Failure("check bucket", exception);
+
+            throw new ObjectStorageException(
+                "Checking the object-storage bucket failed.",
+                exception);
+        }
+        catch (Exception exception)
+            when (!cancellationToken.IsCancellationRequested)
+        {
+            LogUnexpectedStorageFailure("check bucket", exception);
+
+            throw new ObjectStorageException(
+                "Checking the object-storage bucket failed.",
                 exception);
         }
     }
 
-    private static InvalidOperationException CreateStorageException(
+    private static ObjectStorageException CreateStorageException(
         string operation,
-        string bucketName,
-        string objectKey,
+        Exception exception)
+    {
+        return new ObjectStorageException(
+            $"The object-storage operation '{operation}' failed.",
+            exception);
+    }
+
+    private void LogS3Failure(
+        string operation,
         AmazonS3Exception exception)
     {
-        return new InvalidOperationException(
-            $"Failed to {operation} S3 object " +
-            $"'{bucketName}/{objectKey}'. " +
-            $"Status: {(int)exception.StatusCode} ({exception.StatusCode}), " +
-            $"error code: '{exception.ErrorCode}'.",
-            exception);
+        _logger.LogError(
+            "S3 operation {StorageOperation} failed with HTTP status {StatusCode}, " +
+            "error code {ErrorCode} and request ID {RequestId}.",
+            operation,
+            (int)exception.StatusCode,
+            exception.ErrorCode,
+            exception.RequestId);
+    }
+
+    private void LogUnexpectedStorageFailure(
+        string operation,
+        Exception exception)
+    {
+        _logger.LogError(
+            "Object-storage operation {StorageOperation} failed with error type " +
+            "{StorageErrorType}.",
+            operation,
+            exception.GetType().Name);
     }
 
     private static bool IsNotFound(AmazonS3Exception exception)
@@ -297,8 +387,7 @@ public sealed class S3ObjectStorage : IObjectStorage, IDisposable
 
     private static bool IsBucketAlreadyExists(AmazonS3Exception exception)
     {
-        return exception.StatusCode == HttpStatusCode.Conflict ||
-               string.Equals(
+        return string.Equals(
                    exception.ErrorCode,
                    "BucketAlreadyExists",
                    StringComparison.OrdinalIgnoreCase) ||
@@ -328,6 +417,22 @@ public sealed class S3ObjectStorage : IObjectStorage, IDisposable
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(bucketName);
         ArgumentException.ThrowIfNullOrWhiteSpace(objectKey);
+
+        if (!string.Equals(bucketName, bucketName.Trim(), StringComparison.Ordinal)
+            || bucketName.Length > 255
+            || bucketName.Any(char.IsControl))
+        {
+            throw new ArgumentException(
+                "The bucket name is invalid.",
+                nameof(bucketName));
+        }
+
+        if (objectKey.Length > 1024 || objectKey.Any(char.IsControl))
+        {
+            throw new ArgumentException(
+                "The object key is invalid.",
+                nameof(objectKey));
+        }
     }
 
     private void ThrowIfDisposed()
