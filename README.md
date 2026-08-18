@@ -431,7 +431,7 @@ MTSM.Cirrus/
 │   ├── Program.cs
 │   └── Worker.cs
 │
-├── MTSM.Cirrus.Tests/
+├── MTSM.Cirrus.Core.Tests/
 │
 ├── LICENSE.txt
 ├── MTSM.Cirrus.slnx
@@ -446,7 +446,7 @@ MTSM.Cirrus/
 | `MTSM.Cirrus.Core` | Archive domain logic, persistence, entities and object-storage integration |
 | `MTSM.Cirrus.Migration` | Database migration execution |
 | `MTSM.Cirrus.Worker` | Scheduled integrity verification and future background processing |
-| `MTSM.Cirrus.Tests` | Automated tests |
+| `MTSM.Cirrus.Core.Tests` | Automated Core and database migration tests |
 
 ---
 
@@ -2048,9 +2048,10 @@ dotnet build \
 
 ### Test
 
-Automated tests currently cover `MTSM.Cirrus.Core`. The suite contains fast
-contract tests and PostgreSQL integration tests for database-specific behavior
-such as persistence, searching, row locking and concurrent deletion requests.
+Automated tests currently cover `MTSM.Cirrus.Core` and the Entity Framework Core
+database migration chain. The suite contains fast contract tests and PostgreSQL
+integration tests for database-specific behavior such as persistence, searching,
+row locking, concurrent deletion requests and schema upgrades.
 
 Run the Core test suite in Release configuration:
 
@@ -2095,6 +2096,9 @@ The Core suite covers:
 - PostgreSQL failures
 - Request cancellation
 - Validation errors
+- Migration from an empty PostgreSQL database
+- Upgrade from the previous database version
+- Preservation of existing archive data during upgrades
 
 See the [Core test-suite documentation](MTSM.Cirrus.Core.Tests/README.md) for
 PowerShell examples, database setup details and code-coverage commands.

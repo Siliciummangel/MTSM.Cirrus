@@ -120,4 +120,14 @@ public sealed class PostgresFixture : IAsyncLifetime
             ?? throw new InvalidOperationException(
                 "The PostgreSQL integration fixture is not configured.");
     }
+
+    public async Task ResetCirrusSchemaAsync()
+    {
+        await using CirrusDbContext dbContext =
+            CoreTestFactory.CreateDbContext(
+                GetRequiredConnectionString());
+
+        await dbContext.Database.ExecuteSqlRawAsync(
+            "DROP SCHEMA IF EXISTS cirrus CASCADE;");
+    }
 }

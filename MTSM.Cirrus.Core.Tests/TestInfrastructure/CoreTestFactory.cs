@@ -12,7 +12,17 @@ internal static class CoreTestFactory
     public static CirrusDbContext CreateDbContext(string connectionString)
     {
         var options = new DbContextOptionsBuilder<CirrusDbContext>()
-            .UseNpgsql(connectionString)
+            .UseNpgsql(
+                connectionString,
+                npgsql =>
+                {
+                    npgsql.MigrationsAssembly(
+                        "MTSM.Cirrus.Migration");
+
+                    npgsql.MigrationsHistoryTable(
+                        "__EFMigrationsHistory",
+                        "cirrus");
+                })
             .UseSnakeCaseNamingConvention()
             .Options;
 
