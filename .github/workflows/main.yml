@@ -1,0 +1,57 @@
+name: .NET CI
+
+on:
+  push:
+    branches: ["main"]
+  pull_request:
+    branches: ["main"]
+  workflow_dispatch:
+
+jobs:
+  build-and-test:
+    runs-on: ubuntu-latest
+
+    services:
+      postgres:
+        image: postgres:18
+        env:
+          POSTGRES_DB: cirrus_test
+          POSTGRES_USER: cirrus
+          POSTGRES_PASSWORD: cirrus-test-password
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U cirrus -d cirrus_test"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+
+    env:
+      CI: "true"
+      CIRRUS_TEST_POSTGRES: >-
+        Host=localhost;Port=5432;Database=cirrus_test;Username=cirrus;Password=cirrus-test-password
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v5
+        with:
+          dotnet-version: 10.0.x
+
+      - name: Restore dependencies
+        run: dotnet restore MTSM.Cirrus.slnx
+
+      - name: Build release
+        run: >
+          dotnet build MTSM.Cirrus.slnx
+          --configuration Release
+          --no-restore
+
+      - name: Run tests
+        run: >
+          dotnet test MTSM.Cirrus.slnx
+          --configuration Release
+          --no-build
+          --verbosity normal
