@@ -17,6 +17,19 @@ dotnet test MTSM.Cirrus.Core.Tests/MTSM.Cirrus.Core.Tests.csproj `
 When PostgreSQL is not configured, integration tests are reported as skipped on
 developer machines.
 
+## API integration tests
+
+The API tests start the complete ASP.NET Core request pipeline in memory and
+replace only `IArchiveService` with a controllable test implementation. They
+exercise every archive endpoint, including multipart binding, response mapping,
+download and metadata headers, actor handling, route generation and unknown
+routes.
+
+The suite also verifies validation responses and the central exception mapping
+for not-found, unavailable, invalid, conflicting, archive and unexpected
+failures. Server-side failure details must not leak into 500 responses. These
+tests require no external services and therefore always run locally and in CI.
+
 ## PostgreSQL integration tests
 
 Provide a dedicated, disposable database through `CIRRUS_TEST_POSTGRES`. For

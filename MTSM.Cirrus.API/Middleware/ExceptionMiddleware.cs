@@ -86,6 +86,8 @@ public sealed class ExceptionMiddleware
 
         await context.Response.WriteAsJsonAsync(
             problemDetails,
+            options: null,
+            contentType: "application/problem+json",
             cancellationToken: context.RequestAborted);
     }
 

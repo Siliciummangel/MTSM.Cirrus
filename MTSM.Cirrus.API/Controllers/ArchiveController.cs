@@ -9,7 +9,6 @@ namespace MTSM.Cirrus.API.Controllers;
 
 [ApiController]
 [Route("api/archive")]
-[Produces("application/json")]
 public sealed class ArchiveController : ControllerBase
 {
     private const string ActorHeaderName = "X-Actor";

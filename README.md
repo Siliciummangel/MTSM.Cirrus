@@ -2105,6 +2105,10 @@ The test suite covers:
 - Exclusive claims across concurrently running workers
 - Integrity-check retry scheduling, incrementing and resolution
 - Enforcement of the configured worker concurrency limit
+- HTTP contracts for every archive API endpoint
+- Multipart binding, response mapping and archive response headers
+- Validation and standardized `ProblemDetails` error responses
+- Safe mapping of domain and unexpected exceptions to HTTP status codes
 
 See the [test-suite documentation](MTSM.Cirrus.Core.Tests/README.md) for
 PowerShell examples, database setup details and code-coverage commands.
