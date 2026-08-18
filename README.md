@@ -446,7 +446,7 @@ MTSM.Cirrus/
 | `MTSM.Cirrus.Core` | Archive domain logic, persistence, entities and object-storage integration |
 | `MTSM.Cirrus.Migration` | Database migration execution |
 | `MTSM.Cirrus.Worker` | Scheduled integrity verification and future background processing |
-| `MTSM.Cirrus.Core.Tests` | Automated Core and database migration tests |
+| `MTSM.Cirrus.Core.Tests` | Automated Core, worker and database migration tests |
 
 ---
 
@@ -2047,11 +2047,11 @@ dotnet build \
 
 ### Test
 
-Automated tests currently cover `MTSM.Cirrus.Core`, its S3-compatible object
-storage integration and the Entity Framework Core database migration chain. The
-suite contains fast contract tests plus PostgreSQL and S3-compatible integration
-tests for persistence, storage round trips, searching, row locking, concurrent
-deletion requests and schema upgrades.
+Automated tests currently cover `MTSM.Cirrus.Core`, the integrity-check processing
+in `MTSM.Cirrus.Worker`, S3-compatible object storage integration and the Entity
+Framework Core database migration chain. The suite contains fast contract tests
+plus PostgreSQL and S3-compatible integration tests for persistence, storage
+round trips, searching, row locking, concurrent processing and schema upgrades.
 
 Run the Core test suite in Release configuration:
 
@@ -2080,7 +2080,7 @@ Without `CIRRUS_TEST_POSTGRES`, integration tests are reported as skipped on a
 developer machine. When `CI=true`, missing or unsafe PostgreSQL configuration
 causes them to fail instead, preventing an incomplete CI test run from passing.
 
-The Core suite covers:
+The test suite covers:
 
 - Successful archival
 - SHA-256 calculation
@@ -2101,8 +2101,12 @@ The Core suite covers:
 - Migration from an empty PostgreSQL database
 - Upgrade from the previous database version
 - Preservation of existing archive data during upgrades
+- Active and expired worker leases
+- Exclusive claims across concurrently running workers
+- Integrity-check retry scheduling, incrementing and resolution
+- Enforcement of the configured worker concurrency limit
 
-See the [Core test-suite documentation](MTSM.Cirrus.Core.Tests/README.md) for
+See the [test-suite documentation](MTSM.Cirrus.Core.Tests/README.md) for
 PowerShell examples, database setup details and code-coverage commands.
 
 ---

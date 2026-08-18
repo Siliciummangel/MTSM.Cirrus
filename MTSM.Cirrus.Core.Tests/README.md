@@ -1,9 +1,9 @@
 # Test suite
 
-The project tests `MTSM.Cirrus.Core` behavior and the Entity Framework Core
-database migration chain. It contains fast contract tests and PostgreSQL
-integration tests for behavior that cannot be represented faithfully with EF
-InMemory or SQLite.
+The project tests `MTSM.Cirrus.Core` behavior, integrity-check processing in
+`MTSM.Cirrus.Worker` and the Entity Framework Core database migration chain. It
+contains fast contract tests and PostgreSQL integration tests for behavior that
+cannot be represented faithfully with EF InMemory or SQLite.
 
 ## Fast tests
 
@@ -41,6 +41,17 @@ that must be retained.
 When `CI=true`, missing or unsafe PostgreSQL configuration fails the integration
 tests instead of skipping them.
 
+## Worker integration tests
+
+The worker tests use the same guarded PostgreSQL fixture and exercise the real
+integrity-check processor. They cover active and expired leases, exclusive
+claims by concurrent workers, repeated failures and successful retry resolution,
+and enforcement of the configured per-worker concurrency limit.
+
+The fixture resets and seeds the `cirrus` schema before and after every worker
+test. Worker tests therefore run in the serialized PostgreSQL test collection
+and require no additional configuration beyond `CIRRUS_TEST_POSTGRES`.
+
 ## S3-compatible integration tests
 
 The storage integration tests execute the real `S3ObjectStorage` implementation
@@ -52,7 +63,7 @@ docker run --rm --name cirrus-seaweedfs `
   --env AWS_ACCESS_KEY_ID=cirrus-test-access `
   --env AWS_SECRET_ACCESS_KEY=cirrus-test-secret-key `
   --env S3_BUCKET=cirrus-test-bootstrap `
-  chrislusf/seaweedfs:4.39
+  chrislusf/seaweedfs:4.42
 ```
 
 Then set the test configuration in a second terminal:
