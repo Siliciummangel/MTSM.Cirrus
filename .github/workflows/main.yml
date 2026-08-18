@@ -68,6 +68,32 @@ jobs:
       - name: Restore dependencies
         run: dotnet restore MTSM.Cirrus.slnx
 
+      - name: Audit NuGet dependencies
+        run: |
+          audit_report="$(dotnet package list \
+            --project MTSM.Cirrus.slnx \
+            --vulnerable \
+            --include-transitive \
+            --format json \
+            --output-version 1 \
+            --no-restore)"
+
+          printf '%s\n' "$audit_report"
+
+          vulnerability_count="$(
+            jq '[
+              ..
+              | objects
+              | select(.vulnerabilities? != null)
+              | .vulnerabilities[]
+            ] | length' <<< "$audit_report"
+          )"
+
+          if [ "$vulnerability_count" -ne 0 ]; then
+            echo "Found $vulnerability_count known NuGet vulnerability entries."
+            exit 1
+          fi
+
       - name: Build release
         run: >
           dotnet build MTSM.Cirrus.slnx

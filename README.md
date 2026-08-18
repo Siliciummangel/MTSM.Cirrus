@@ -2080,6 +2080,19 @@ Without `CIRRUS_TEST_POSTGRES`, integration tests are reported as skipped on a
 developer machine. When `CI=true`, missing or unsafe PostgreSQL configuration
 causes them to fail instead, preventing an incomplete CI test run from passing.
 
+CI also audits all direct and transitive NuGet dependencies against the
+vulnerability data supplied by the configured package sources. Any reported
+vulnerability fails the job. Run the same audit locally after restoring the
+solution:
+
+```bash
+dotnet package list \
+  --project MTSM.Cirrus.slnx \
+  --vulnerable \
+  --include-transitive \
+  --no-restore
+```
+
 The test suite covers:
 
 - Successful archival
