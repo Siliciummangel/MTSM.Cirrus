@@ -9,6 +9,7 @@ namespace MTSM.Cirrus.Core.Tests;
 
 [Collection(PostgresCollection.Name)]
 public sealed class DatabaseMigrationTests(PostgresFixture fixture)
+    : IAsyncLifetime
 {
     // Database schema shipped with Cirrus 0.1.0.
     // Update only when the supported upgrade baseline changes.
@@ -100,5 +101,15 @@ public sealed class DatabaseMigrationTests(PostgresFixture fixture)
     {
         return CoreTestFactory.CreateDbContext(
             fixture.GetRequiredConnectionString());
+    }
+
+    public Task InitializeAsync()
+    {
+        return Task.CompletedTask;
+    }
+
+    public Task DisposeAsync()
+    {
+        return fixture.ResetAndSeedAsync();
     }
 }

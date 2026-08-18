@@ -72,11 +72,21 @@ public sealed class PostgresFixture : IAsyncLifetime
             return;
         }
 
+        await ResetAndSeedAsync();
+    }
+
+    public async Task ResetAndSeedAsync()
+    {
+        if (ConnectionString is null)
+        {
+            return;
+        }
+
+        await ResetCirrusSchemaAsync();
+
         await using CirrusDbContext dbContext =
             CoreTestFactory.CreateDbContext(ConnectionString);
 
-        await dbContext.Database.ExecuteSqlRawAsync(
-            "DROP SCHEMA IF EXISTS cirrus CASCADE;");
         await dbContext.Database.EnsureCreatedAsync();
 
         dbContext.BusinessReferenceTypes.AddRange(
