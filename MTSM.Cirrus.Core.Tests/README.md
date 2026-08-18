@@ -41,6 +41,42 @@ that must be retained.
 When `CI=true`, missing or unsafe PostgreSQL configuration fails the integration
 tests instead of skipping them.
 
+## S3-compatible integration tests
+
+The storage integration tests execute the real `S3ObjectStorage` implementation
+against an S3-compatible service. Configure a dedicated disposable service with:
+
+```powershell
+docker run --rm --name cirrus-seaweedfs `
+  --publish 8333:8333 `
+  --env AWS_ACCESS_KEY_ID=cirrus-test-access `
+  --env AWS_SECRET_ACCESS_KEY=cirrus-test-secret-key `
+  --env S3_BUCKET=cirrus-test-bootstrap `
+  chrislusf/seaweedfs:4.39
+```
+
+Then set the test configuration in a second terminal:
+
+```powershell
+$env:CIRRUS_TEST_S3_SERVICE_URL = 'http://127.0.0.1:8333'
+$env:CIRRUS_TEST_S3_ACCESS_KEY = 'cirrus-test-access'
+$env:CIRRUS_TEST_S3_SECRET_KEY = 'cirrus-test-secret-key'
+$env:CIRRUS_TEST_S3_REGION = 'us-east-1'
+
+dotnet test MTSM.Cirrus.Core.Tests/MTSM.Cirrus.Core.Tests.csproj `
+  --configuration Release
+```
+
+Each test run creates a uniquely named bucket beginning with `cirrus-test-` and
+removes its objects and bucket afterwards. Cleanup refuses to delete buckets
+outside that namespace. Never configure credentials for storage containing data
+that must be retained.
+
+Without complete S3 test configuration, these tests are skipped on developer
+machines. When `CI=true`, missing or invalid configuration fails the tests. CI
+uses a pinned SeaweedFS container; the tests themselves remain independent of a
+specific S3-compatible provider.
+
 ## Coverage
 
 ```powershell

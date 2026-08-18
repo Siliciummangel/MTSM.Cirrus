@@ -474,7 +474,6 @@ Cirrus communicates with object storage through an S3-compatible API.
 Possible storage backends include:
 
 - Garage
-- MinIO
 - SeaweedFS
 - Ceph Object Gateway
 - AWS S3
@@ -2048,10 +2047,11 @@ dotnet build \
 
 ### Test
 
-Automated tests currently cover `MTSM.Cirrus.Core` and the Entity Framework Core
-database migration chain. The suite contains fast contract tests and PostgreSQL
-integration tests for database-specific behavior such as persistence, searching,
-row locking, concurrent deletion requests and schema upgrades.
+Automated tests currently cover `MTSM.Cirrus.Core`, its S3-compatible object
+storage integration and the Entity Framework Core database migration chain. The
+suite contains fast contract tests plus PostgreSQL and S3-compatible integration
+tests for persistence, storage round trips, searching, row locking, concurrent
+deletion requests and schema upgrades.
 
 Run the Core test suite in Release configuration:
 
@@ -2086,6 +2086,8 @@ The Core suite covers:
 - SHA-256 calculation
 - Metadata persistence
 - Object-storage upload
+- S3-compatible write, existence and read behavior
+- S3-compatible missing-object error handling
 - Download behavior
 - Metadata retrieval
 - Search behavior

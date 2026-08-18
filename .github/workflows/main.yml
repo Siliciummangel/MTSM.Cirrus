@@ -30,6 +30,10 @@ jobs:
       CI: "true"
       CIRRUS_TEST_POSTGRES: >-
         Host=localhost;Port=5432;Database=cirrus_test;Username=cirrus;Password=cirrus-test-password
+      CIRRUS_TEST_S3_SERVICE_URL: http://127.0.0.1:8333
+      CIRRUS_TEST_S3_ACCESS_KEY: cirrus-test-access
+      CIRRUS_TEST_S3_SECRET_KEY: cirrus-test-secret-key
+      CIRRUS_TEST_S3_REGION: us-east-1
 
     steps:
       - name: Checkout
@@ -39,6 +43,27 @@ jobs:
         uses: actions/setup-dotnet@v5
         with:
           dotnet-version: 10.0.x
+
+      - name: Start S3-compatible storage
+        run: |
+          docker run --detach --rm \
+            --name cirrus-seaweedfs \
+            --publish 8333:8333 \
+            --env AWS_ACCESS_KEY_ID=cirrus-test-access \
+            --env AWS_SECRET_ACCESS_KEY=cirrus-test-secret-key \
+            --env S3_BUCKET=cirrus-test-bootstrap \
+            chrislusf/seaweedfs:4.42
+
+          for attempt in {1..30}; do
+            if curl --silent --output /dev/null http://127.0.0.1:8333; then
+              exit 0
+            fi
+
+            sleep 1
+          done
+
+          docker logs cirrus-seaweedfs
+          exit 1
 
       - name: Restore dependencies
         run: dotnet restore MTSM.Cirrus.slnx
