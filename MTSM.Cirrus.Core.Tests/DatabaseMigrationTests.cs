@@ -52,7 +52,7 @@ public sealed class DatabaseMigrationTests(PostgresFixture fixture)
 
         await dbContext.Database.ExecuteSqlRawAsync(
             """
-            INSERT INTO cirrus.business_reference_type (reference_type_key)
+            INSERT INTO cirrus.business_ref_type (reference_type_key)
             VALUES ('migration-object-id');
 
             WITH inserted_archive AS (
@@ -102,7 +102,7 @@ public sealed class DatabaseMigrationTests(PostgresFixture fixture)
                    'tenant-a',
                    CURRENT_TIMESTAMP
             FROM inserted_archive
-            CROSS JOIN cirrus.business_reference_type AS reference_type
+            CROSS JOIN cirrus.business_ref_type AS reference_type
             WHERE reference_type.reference_type_key = 'migration-object-id';
             """);
 
