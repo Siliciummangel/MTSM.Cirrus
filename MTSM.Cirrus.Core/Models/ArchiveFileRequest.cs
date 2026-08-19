@@ -14,7 +14,7 @@ public sealed class ArchiveFileRequest
 
     public string? Partner { get; init; }
 
-    public required string Tenant { get; init; }
+    public long TenantId { get; init; }
 
     public DateTimeOffset ReceivedAt { get; init; }
 

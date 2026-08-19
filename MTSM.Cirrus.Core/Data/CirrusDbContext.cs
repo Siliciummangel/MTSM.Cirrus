@@ -13,6 +13,9 @@ public sealed class CirrusDbContext : DbContext
     public DbSet<ArchiveObject> ArchiveObjects =>
         Set<ArchiveObject>();
 
+    public DbSet<Tenant> Tenants =>
+        Set<Tenant>();
+
     public DbSet<BusinessReferenceType> BusinessReferenceTypes =>
         Set<BusinessReferenceType>();
 

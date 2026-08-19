@@ -14,6 +14,8 @@ public sealed class IntegrityCheckProcessor(
     IOptions<IntegrityCheckOptions> options,
     ILogger<IntegrityCheckProcessor> logger)
 {
+    private sealed record WorkItem(long ArchiveObjectId, long TenantId);
+
     private readonly IntegrityCheckOptions _options = options.Value;
 
     public async Task<int> ProcessBatchAsync(
@@ -30,13 +32,13 @@ public sealed class IntegrityCheckProcessor(
         await InitializeSchedulesAsync(
             cancellationToken);
 
-        long[] archiveObjectIds = await ClaimBatchAsync(
+        WorkItem[] workItems = await ClaimBatchAsync(
             leaseOwner,
             now,
             leaseUntil,
             cancellationToken);
 
-        if (archiveObjectIds.Length == 0)
+        if (workItems.Length == 0)
         {
             return 0;
         }
@@ -44,24 +46,25 @@ public sealed class IntegrityCheckProcessor(
         logger.LogInformation(
             "Worker {WorkerInstanceId} claimed {Count} integrity checks.",
             workerInstanceId,
-            archiveObjectIds.Length);
+            workItems.Length);
 
         await Parallel.ForEachAsync(
-            archiveObjectIds,
+            workItems,
             new ParallelOptions
             {
                 MaxDegreeOfParallelism =
                     _options.MaxConcurrentChecks,
                 CancellationToken = cancellationToken
             },
-            async (archiveObjectId, itemCancellationToken) =>
+            async (workItem, itemCancellationToken) =>
                 await ProcessOneAsync(
-                    archiveObjectId,
+                    workItem.TenantId,
+                    workItem.ArchiveObjectId,
                     workerInstanceId,
                     leaseOwner,
                     itemCancellationToken));
 
-        return archiveObjectIds.Length;
+        return workItems.Length;
     }
 
     private async Task InitializeSchedulesAsync(
@@ -88,7 +91,7 @@ public sealed class IntegrityCheckProcessor(
             cancellationToken);
     }
 
-    private async Task<long[]> ClaimBatchAsync(
+    private async Task<WorkItem[]> ClaimBatchAsync(
         string leaseOwner,
         DateTimeOffset now,
         DateTimeOffset leaseUntil,
@@ -108,7 +111,10 @@ public sealed class IntegrityCheckProcessor(
             WHERE archive_object.archive_object_id IN (
                 SELECT candidate.archive_object_id
                 FROM cirrus.archive_object AS candidate
+                INNER JOIN cirrus.tenant AS tenant
+                    ON tenant.tenant_id = candidate.tenant_id
                 WHERE candidate.archive_status = 'Active'
+                  AND tenant.status <> 'Disabled'
                   AND candidate.archived_at IS NOT NULL
                   AND candidate.next_integrity_check_at <= {now}
                   AND (
@@ -127,11 +133,14 @@ public sealed class IntegrityCheckProcessor(
             .Where(archiveObject =>
                 archiveObject.IntegrityCheckLeaseOwner == leaseOwner)
             .OrderBy(archiveObject => archiveObject.ArchiveObjectId)
-            .Select(archiveObject => archiveObject.ArchiveObjectId)
+            .Select(archiveObject => new WorkItem(
+                archiveObject.ArchiveObjectId,
+                archiveObject.TenantId))
             .ToArrayAsync(cancellationToken);
     }
 
     private async Task ProcessOneAsync(
+        long tenantId,
         long archiveObjectId,
         string workerInstanceId,
         string leaseOwner,
@@ -158,6 +167,7 @@ public sealed class IntegrityCheckProcessor(
 
             ArchiveIntegrityResult result =
                 await archiveService.VerifyIntegrityAsync(
+                    tenantId,
                     archiveObjectId,
                     $"archive-worker/{workerInstanceId}",
                     leaseCancellation.Token);

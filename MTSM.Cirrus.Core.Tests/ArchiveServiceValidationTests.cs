@@ -8,16 +8,16 @@ namespace MTSM.Cirrus.Core.Tests;
 public sealed class ArchiveServiceValidationTests
 {
     [Theory]
-    [InlineData("", "type", "source", "tenant", "actor")]
-    [InlineData("file.txt", " ", "source", "tenant", "actor")]
-    [InlineData("file.txt", "type", "\r\n", "tenant", "actor")]
-    [InlineData("file.txt", "type", "source", "tenant", "\u0001")]
-    [InlineData("folder/file.txt", "type", "source", "tenant", "actor")]
+    [InlineData("", "type", "source", 1L, "actor")]
+    [InlineData("file.txt", " ", "source", 1L, "actor")]
+    [InlineData("file.txt", "type", "\r\n", 1L, "actor")]
+    [InlineData("file.txt", "type", "source", 1L, "\u0001")]
+    [InlineData("folder/file.txt", "type", "source", 1L, "actor")]
     public async Task ArchiveAsync_RejectsInvalidRequiredMetadata(
         string filename,
         string fileType,
         string sourceSystem,
-        string tenant,
+        long tenant,
         string actor)
     {
         await using CirrusDbContext dbContext = CreateDisconnectedContext();
@@ -31,6 +31,16 @@ public sealed class ArchiveServiceValidationTests
 
         await Assert.ThrowsAnyAsync<ArgumentException>(
             () => service.ArchiveAsync(request));
+    }
+
+    [Fact]
+    public async Task ArchiveAsync_RejectsNonPositiveTenantId()
+    {
+        await using CirrusDbContext dbContext = CreateDisconnectedContext();
+        var service = CoreTestFactory.CreateService(dbContext, new InMemoryObjectStorage());
+
+        await Assert.ThrowsAsync<ArgumentOutOfRangeException>(() =>
+            service.ArchiveAsync(CreateRequest(tenant: 0)));
     }
 
     [Fact]
@@ -56,7 +66,7 @@ public sealed class ArchiveServiceValidationTests
         var service = CoreTestFactory.CreateService(dbContext, new InMemoryObjectStorage());
 
         await Assert.ThrowsAnyAsync<ArgumentException>(() =>
-            service.SearchAsync(new ArchiveSearchRequest
+            service.SearchAsync(1, new ArchiveSearchRequest
             {
                 PageNumber = pageNumber,
                 PageSize = pageSize
@@ -74,14 +84,14 @@ public sealed class ArchiveServiceValidationTests
             OriginalFilename = "file.txt",
             FileType = "invoice",
             SourceSystem = "erp",
-            Tenant = "tenant-a",
+            TenantId = 1,
             ReceivedAt = new DateTimeOffset(2026, 1, 1, 0, 0, 0, TimeSpan.Zero),
             CreatedBy = "test-suite",
             RetentionUntil = new DateOnly(2036, 1, 1),
             BusinessReferences =
             [
-                new ArchiveBusinessReferenceInput(1, "REF-1", "invoice", "tenant-a"),
-                new ArchiveBusinessReferenceInput(1, " REF-1 ", " invoice ", " tenant-a ")
+                new ArchiveBusinessReferenceInput(1, "REF-1", "invoice"),
+                new ArchiveBusinessReferenceInput(1, " REF-1 ", " invoice ")
             ]
         };
 
@@ -96,7 +106,7 @@ public sealed class ArchiveServiceValidationTests
         var service = CoreTestFactory.CreateService(dbContext, new InMemoryObjectStorage());
 
         await Assert.ThrowsAsync<ArgumentException>(() =>
-            service.SearchAsync(new ArchiveSearchRequest
+            service.SearchAsync(1, new ArchiveSearchRequest
             {
                 Sha256Hash = "not-a-sha256"
             }));
@@ -116,7 +126,7 @@ public sealed class ArchiveServiceValidationTests
         string filename = "file.txt",
         string fileType = "invoice",
         string sourceSystem = "erp",
-        string tenant = "tenant-a",
+        long tenant = 1,
         string actor = "test-suite",
         DateOnly? retentionUntil = null)
     {
@@ -126,7 +136,7 @@ public sealed class ArchiveServiceValidationTests
             OriginalFilename = filename,
             FileType = fileType,
             SourceSystem = sourceSystem,
-            Tenant = tenant,
+            TenantId = tenant,
             ReceivedAt = new DateTimeOffset(2026, 1, 1, 0, 0, 0, TimeSpan.Zero),
             CreatedBy = actor,
             RetentionUntil = retentionUntil ?? new DateOnly(2036, 1, 1)

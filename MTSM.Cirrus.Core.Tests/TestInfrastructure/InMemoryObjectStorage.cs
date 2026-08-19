@@ -21,6 +21,7 @@ internal sealed class InMemoryObjectStorage : IObjectStorage
         string objectKey,
         Stream content,
         string? contentType,
+        string? encryptionKeyId = null,
         CancellationToken cancellationToken = default)
     {
         if (WriteException is not null)

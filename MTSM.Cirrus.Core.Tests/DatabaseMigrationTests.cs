@@ -52,6 +52,10 @@ public sealed class DatabaseMigrationTests(PostgresFixture fixture)
 
         await dbContext.Database.ExecuteSqlRawAsync(
             """
+            INSERT INTO cirrus.business_reference_type (reference_type_key)
+            VALUES ('migration-object-id');
+
+            WITH inserted_archive AS (
             INSERT INTO cirrus.archive_object
             (
                 object_key,
@@ -68,7 +72,7 @@ public sealed class DatabaseMigrationTests(PostgresFixture fixture)
             )
             VALUES
             (
-                'upgrade/object',
+                'objects/tenant-a/migration-test/2026/08/18/upgrade',
                 'cirrus-test',
                 'migration-test',
                 'migration-suite',
@@ -79,17 +83,39 @@ public sealed class DatabaseMigrationTests(PostgresFixture fixture)
                 'Active',
                 FALSE,
                 'migration-suite'
-            );
+            )
+            RETURNING archive_object_id
+            )
+            INSERT INTO cirrus.archive_business_ref
+            (
+                archive_object_id,
+                business_reference_type_id,
+                reference_value,
+                business_type,
+                tenant,
+                created_at
+            )
+            SELECT inserted_archive.archive_object_id,
+                   reference_type.business_reference_type_id,
+                   'upgrade-object',
+                   'migration-test',
+                   'tenant-a',
+                   CURRENT_TIMESTAMP
+            FROM inserted_archive
+            CROSS JOIN cirrus.business_reference_type AS reference_type
+            WHERE reference_type.reference_type_key = 'migration-object-id';
             """);
 
         await dbContext.Database.MigrateAsync();
         dbContext.ChangeTracker.Clear();
 
         ArchiveObject archiveObject = await dbContext.ArchiveObjects
-            .SingleAsync(item => item.ObjectKey == "upgrade/object");
+            .SingleAsync(item => item.ObjectKey ==
+                "objects/tenant-a/migration-test/2026/08/18/upgrade");
 
         Assert.Equal("upgrade.txt", archiveObject.OriginalFilename);
         Assert.Equal(42, archiveObject.SizeBytes);
+        Assert.True(archiveObject.TenantId > 0);
         Assert.Null(archiveObject.LastIntegrityCheckAt);
         Assert.Null(archiveObject.NextIntegrityCheckAt);
         Assert.Null(archiveObject.IntegrityCheckLeaseOwner);

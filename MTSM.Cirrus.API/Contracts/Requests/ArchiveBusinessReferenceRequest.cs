@@ -15,7 +15,4 @@ public sealed class ArchiveBusinessReferenceRequest
     [StringLength(100)]
     public string BusinessType { get; init; } = string.Empty;
 
-    [Required]
-    [StringLength(100)]
-    public string Tenant { get; init; } = string.Empty;
 }

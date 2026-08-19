@@ -13,22 +13,21 @@ public sealed class ArchiveBusinessReferenceConfiguration
 
         builder.HasKey(x => new
         {
+            x.TenantId,
             x.ArchiveObjectId,
             x.BusinessReferenceTypeId,
             x.ReferenceValue,
-            x.BusinessType,
-            x.Tenant
+            x.BusinessType
         });
+
+        builder.Property(x => x.TenantId)
+            .IsRequired();
 
         builder.Property(x => x.ReferenceValue)
             .HasMaxLength(255)
             .IsRequired();
 
         builder.Property(x => x.BusinessType)
-            .HasMaxLength(50)
-            .IsRequired();
-
-        builder.Property(x => x.Tenant)
             .HasMaxLength(50)
             .IsRequired();
 
@@ -39,28 +38,31 @@ public sealed class ArchiveBusinessReferenceConfiguration
 
         builder.HasIndex(x => new
         {
+            x.TenantId,
             x.BusinessReferenceTypeId,
             x.ReferenceValue,
-            x.BusinessType,
-            x.Tenant
+            x.BusinessType
         });
 
         builder.HasIndex(x => new
         {
-            x.BusinessType,
-            x.Tenant
-        });
-
-        builder.HasIndex(x => new
-        {
-            x.Tenant,
+            x.TenantId,
             x.BusinessType,
             x.ReferenceValue
         });
 
         builder.HasOne(x => x.ArchiveObject)
             .WithMany(x => x.BusinessReferences)
-            .HasForeignKey(x => x.ArchiveObjectId)
+            .HasForeignKey(x => new
+            {
+                x.TenantId,
+                x.ArchiveObjectId
+            })
+            .HasPrincipalKey(x => new
+            {
+                x.TenantId,
+                x.ArchiveObjectId
+            })
             .OnDelete(DeleteBehavior.Cascade);
 
         builder.HasOne(x => x.BusinessReferenceType)

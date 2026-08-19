@@ -26,7 +26,7 @@ Cirrus is designed as an infrastructure component for application-generated file
 - [Prerequisites](#prerequisites)
 - [Configuration](#configuration)
   - [PostgreSQL configuration](#postgresql-configuration)
-  - [Archive configuration](#archive-configuration)
+  - [Tenant archive configuration](#tenant-archive-configuration)
   - [S3 configuration](#s3-configuration)
   - [API configuration](#api-configuration)
   - [Worker integrity-check configuration](#worker-integrity-check-configuration)
@@ -505,16 +505,12 @@ Values can be provided through:
 - Command-line arguments
 - Kubernetes Secrets and ConfigMaps
 
-The API currently uses four main configuration sections:
+The API currently uses three main configuration sections:
 
 ```json
 {
   "ConnectionStrings": {
     "ArchiveDatabase": "..."
-  },
-  "Archive": {
-    "BucketName": "...",
-    "ObjectKeyPrefix": "..."
   },
   "S3": {
     "ServiceUrl": "...",
@@ -574,30 +570,22 @@ For production environments, separate migration and application database users a
 
 ---
 
-### Archive configuration
+### Tenant archive configuration
 
-The `Archive` section controls the storage location used for archived files.
+Archive storage is configured per tenant in `cirrus.tenant`, not globally in
+`appsettings.json`. A tenant record contains its stable ID, display name, lifecycle
+status, S3 bucket, unique object-key prefix, optional KMS key identifier and optional
+default retention policy.
 
-```json
-{
-  "Archive": {
-    "BucketName": "cirrus-archive",
-    "ObjectKeyPrefix": "objects"
-  }
-}
-```
+Tenant IDs are positive, database-generated 64-bit identity values. `Active` tenants
+permit reads and writes, `Suspended`
+tenants remain readable but reject new archive objects, and `Disabled` tenants are
+excluded from API and worker access.
 
-| Setting | Required | Default | Description |
-|---|---:|---|---|
-| `BucketName` | Yes | — | S3 bucket in which archived files are stored |
-| `ObjectKeyPrefix` | No | `objects` | Prefix used when generating object keys |
-
-Environment variables:
-
-```bash
-Archive__BucketName="cirrus-archive"
-Archive__ObjectKeyPrefix="objects"
-```
+Tenant provisioning is an administrative database operation until authenticated
+administration endpoints are introduced. Provision it in the same controlled release
+workflow as retention policies and secrets; never accept storage settings from an
+archive request.
 
 The generated object key is an internal storage identifier. Calling applications should store and use the returned `archiveObjectId` rather than constructing object keys themselves.
 
@@ -782,9 +770,6 @@ Example:
 ```bash
 export ConnectionStrings__ArchiveDatabase="Host=localhost;Port=5432;Database=cirrus;Username=cirrus;Password=change-me"
 
-export Archive__BucketName="cirrus-archive"
-export Archive__ObjectKeyPrefix="objects"
-
 export S3__ServiceUrl="http://localhost:8333"
 export S3__AccessKey="cirrus"
 export S3__SecretKey="change-me"
@@ -921,7 +906,6 @@ MTSM.Cirrus.API/appsettings.json
 At minimum, configure:
 
 - `ConnectionStrings:ArchiveDatabase`
-- `Archive:BucketName`
 - `S3:ServiceUrl`
 - `S3:AccessKey`
 - `S3:SecretKey`
@@ -1044,7 +1028,7 @@ BASE_URL="http://localhost:5190"
 Endpoint:
 
 ```http
-POST /api/archive
+POST /api/tenants/{tenantId}/archive
 ```
 
 Content type:
@@ -1057,12 +1041,11 @@ Example:
 
 ```bash
 curl --request POST \
-  "${BASE_URL}/api/archive" \
+  "${BASE_URL}/api/tenants/1/archive" \
   --form "file=@./example.pdf;type=application/pdf" \
   --form "fileType=invoice" \
   --form "sourceSystem=example-application" \
   --form "partner=example-partner" \
-  --form "tenant=example-tenant" \
   --form "receivedAt=2026-07-27T18:30:00Z" \
   --form "createdBy=max@example.org" \
   --form "retentionUntil=2036-07-27"
@@ -1075,7 +1058,7 @@ Required fields:
 | `file` | File | File content to archive |
 | `fileType` | String | Technical or business file type |
 | `sourceSystem` | String | Application that submitted the file |
-| `tenant` | String | Tenant owning the archive object |
+| `tenantId` | Route | Positive 64-bit identity of the tenant owning the archive object |
 | `createdBy` | String | Actor or system that initiated archival |
 
 Optional fields:
@@ -1133,14 +1116,14 @@ The calling application should persist the returned `archiveObjectId`.
 Endpoint:
 
 ```http
-GET /api/archive/{archiveObjectId}/metadata
+GET /api/tenants/{tenantId}/archive/{archiveObjectId}/metadata
 ```
 
 Example:
 
 ```bash
 curl \
-  "${BASE_URL}/api/archive/16/metadata"
+  "${BASE_URL}/api/tenants/1/archive/16/metadata"
 ```
 
 Example response:
@@ -1195,7 +1178,7 @@ Metadata retrieval does not download the archived file content.
 Endpoint:
 
 ```http
-HEAD /api/archive/{archiveObjectId}
+HEAD /api/tenants/{tenantId}/archive/{archiveObjectId}
 ```
 
 Example:
@@ -1203,7 +1186,7 @@ Example:
 ```bash
 curl \
   --head \
-  "${BASE_URL}/api/archive/16"
+  "${BASE_URL}/api/tenants/1/archive/16"
 ```
 
 Successful status:
@@ -1238,7 +1221,7 @@ The `HEAD` endpoint checks metadata existence. It does not independently verify 
 Endpoint:
 
 ```http
-GET /api/archive/{archiveObjectId}
+GET /api/tenants/{tenantId}/archive/{archiveObjectId}
 ```
 
 The caller must provide the `X-Actor` header.
@@ -1249,7 +1232,7 @@ Example:
 curl \
   --header "X-Actor: max@example.org" \
   --output downloaded-example.pdf \
-  "${BASE_URL}/api/archive/16"
+  "${BASE_URL}/api/tenants/1/archive/16"
 ```
 
 Successful status:
@@ -1296,7 +1279,7 @@ Possible responses:
 Endpoint:
 
 ```http
-GET /api/archive/search
+GET /api/tenants/{tenantId}/archive/search
 ```
 
 All filters are optional. Supported query parameters:
@@ -1321,8 +1304,7 @@ Example:
 
 ```bash
 curl --get \
-  "${BASE_URL}/api/archive/search" \
-  --data-urlencode "tenant=example-tenant" \
+  "${BASE_URL}/api/tenants/1/archive/search" \
   --data-urlencode "sourceSystem=example-application" \
   --data-urlencode "archiveStatus=Active" \
   --data-urlencode "pageNumber=1" \
@@ -1379,7 +1361,7 @@ Invalid pagination, date ranges, hashes or enum values result in
 Endpoint:
 
 ```http
-POST /api/archive/{archiveObjectId}/verify-integrity
+POST /api/tenants/{tenantId}/archive/{archiveObjectId}/verify-integrity
 ```
 
 The caller must provide the `X-Actor` header.
@@ -1390,7 +1372,7 @@ Example:
 curl \
   --request POST \
   --header "X-Actor: max@example.org" \
-  "${BASE_URL}/api/archive/16/verify-integrity"
+  "${BASE_URL}/api/tenants/1/archive/16/verify-integrity"
 ```
 
 The operation reads the complete storage object and recalculates its
@@ -1443,13 +1425,13 @@ performed separately by the `0.2.0` worker.
 Endpoint:
 
 ```http
-GET /api/archive/{archiveObjectId}/integrity-status
+GET /api/tenants/{tenantId}/archive/{archiveObjectId}/integrity-status
 ```
 
 Example:
 
 ```bash
-curl "${BASE_URL}/api/archive/16/integrity-status"
+curl "${BASE_URL}/api/tenants/1/archive/16/integrity-status"
 ```
 
 Example response:
@@ -1495,7 +1477,7 @@ Possible responses:
 Endpoint:
 
 ```http
-DELETE /api/archive/{archiveObjectId}
+DELETE /api/tenants/{tenantId}/archive/{archiveObjectId}
 ```
 
 The caller must provide the `X-Actor` header.
@@ -1506,7 +1488,7 @@ Example:
 curl \
   --request DELETE \
   --header "X-Actor: max@example.org" \
-  "${BASE_URL}/api/archive/16"
+  "${BASE_URL}/api/tenants/1/archive/16"
 ```
 
 Example response:
@@ -1628,7 +1610,6 @@ A business reference consists of:
 | `businessReferenceTypeId` | Reference to the configured reference type |
 | `referenceValue` | External identifier |
 | `businessType` | Business context |
-| `tenant` | Tenant context |
 
 Conceptual example:
 
@@ -1636,14 +1617,18 @@ Conceptual example:
 {
   "businessReferenceTypeId": 1,
   "referenceValue": "INV-2026-000123",
-  "businessType": "invoice",
-  "tenant": "example-tenant"
+  "businessType": "invoice"
 }
 ```
 
 Multiple business references may be assigned to one archive object.
 
 Business references are metadata only. Cirrus does not validate whether the referenced business object exists in the source system.
+
+Every stored business reference also contains the owning archive object's `TenantId`.
+Clients do not submit this value separately; Cirrus derives it from the archive object.
+The database enforces the pairing through a composite foreign key and provides
+tenant-leading indexes for reference searches and aggregate statistics.
 
 ---
 
@@ -1800,7 +1785,7 @@ Example:
   "title": "Archive object not found",
   "status": 404,
   "detail": "Archive object 999 does not exist.",
-  "instance": "/api/archive/999",
+  "instance": "/api/tenants/1/archive/999",
   "traceId": "0HN..."
 }
 ```
@@ -1901,11 +1886,25 @@ Before exposing Cirrus outside a trusted network, consider:
 
 ### Tenant isolation
 
-The presence of a tenant field does not automatically guarantee tenant isolation.
+Tenants are first-class records with a stable ID, lifecycle status, storage bucket,
+object-key prefix, optional encryption-key identifier and optional default retention
+policy. Every archive object has a required foreign key to exactly one tenant.
 
-Until explicit authorization is implemented, callers may potentially request archive objects belonging to another tenant if they know the archive object ID.
+All archive API routes are rooted at `/api/tenants/{tenantId}/archive`. Core queries
+combine the tenant ID and archive object ID, including downloads, metadata, deletion,
+manual integrity checks and integrity status. Requests using another tenant's object ID
+behave as if the object does not exist. Business references carry the owning `TenantId`
+as an indexed, denormalized dimension for efficient lookup and statistics. A composite
+foreign key `(TenantId, ArchiveObjectId)` guarantees that it always matches the owning
+archive object and cannot establish a second ownership source.
 
-Do not treat the current MVP API as a secure multi-tenant boundary.
+The background worker retains system-wide visibility but carries the persisted tenant ID
+into each integrity operation and skips disabled tenants.
+
+Authentication is still required before this structural isolation becomes a production
+security boundary: until then, callers can choose any tenant ID in the route. Phase 2
+must derive the permitted tenant from a trusted authenticated identity and compare it
+with the route tenant.
 
 ### Integrity
 

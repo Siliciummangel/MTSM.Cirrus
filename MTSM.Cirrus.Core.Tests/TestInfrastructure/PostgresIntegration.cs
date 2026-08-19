@@ -107,6 +107,26 @@ public sealed class PostgresFixture : IAsyncLifetime
             WormRequired = false
         });
 
+        dbContext.Tenants.Add(new Tenant
+        {
+            TenantId = 1,
+            DisplayName = "Tenant A",
+            Status = Core.Enums.TenantStatus.Active,
+            BucketName = "cirrus-test",
+            ObjectKeyPrefix = "objects/tenant-a",
+            CreatedAt = DateTimeOffset.UtcNow
+        });
+
+        dbContext.Tenants.Add(new Tenant
+        {
+            TenantId = 2,
+            DisplayName = "Tenant B",
+            Status = Core.Enums.TenantStatus.Active,
+            BucketName = "cirrus-test",
+            ObjectKeyPrefix = "objects/tenant-b",
+            CreatedAt = DateTimeOffset.UtcNow
+        });
+
         await dbContext.SaveChangesAsync();
     }
 

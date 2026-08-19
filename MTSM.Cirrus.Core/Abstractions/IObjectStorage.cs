@@ -13,6 +13,7 @@ public interface IObjectStorage
         string objectKey,
         Stream content,
         string? contentType,
+        string? encryptionKeyId = null,
         CancellationToken cancellationToken = default);
 
     /// <summary>

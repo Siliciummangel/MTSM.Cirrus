@@ -22,17 +22,16 @@ public sealed class ArchiveApiIntegrationTests
             { new ByteArrayContent("payload"u8.ToArray()), "file", "payload.txt" },
             { new StringContent("document"), "fileType" },
             { new StringContent("source-a"), "sourceSystem" },
-            { new StringContent("tenant-a"), "tenant" },
             { new StringContent("api-user"), "createdBy" }
         };
 
         HttpResponseMessage response = await client.PostAsync(
-            "/api/archive",
+            "/api/tenants/1/archive",
             content);
 
         Assert.Equal(HttpStatusCode.Created, response.StatusCode);
         Assert.Equal(
-            "/api/archive/42/metadata",
+            "/api/tenants/1/archive/42/metadata",
             response.Headers.Location?.AbsolutePath);
         ArchiveFileResponse? body =
             await response.Content.ReadFromJsonAsync<ArchiveFileResponse>();
@@ -46,7 +45,7 @@ public sealed class ArchiveApiIntegrationTests
     {
         using var factory = new ApiTestFactory();
         using HttpClient client = factory.CreateClient();
-        using var request = new HttpRequestMessage(HttpMethod.Get, "/api/archive/42");
+        using var request = new HttpRequestMessage(HttpMethod.Get, "/api/tenants/1/archive/42");
         request.Headers.Add("X-Actor", "  api-user  ");
 
         HttpResponseMessage response = await client.SendAsync(request);
@@ -65,14 +64,14 @@ public sealed class ArchiveApiIntegrationTests
         using var factory = new ApiTestFactory();
         factory.ArchiveService.SearchHandler = (request, _) =>
         {
-            Assert.Equal("tenant-a", request.Tenant);
             Assert.Equal(2, request.PageNumber);
             return Task.FromResult(new ArchiveSearchResult([], 2, 25, 0, 0));
         };
         using HttpClient client = factory.CreateClient();
 
         ArchiveSearchResponse? response = await client.GetFromJsonAsync<ArchiveSearchResponse>(
-            "/api/archive/search?tenant=%20tenant-a%20&pageNumber=2&pageSize=25");
+            "/api/tenants/1/archive/search?pageNumber=2&pageSize=25");
+        Assert.Equal(1, factory.ArchiveService.LastTenantId);
 
         Assert.NotNull(response);
         Assert.Equal(2, response.PageNumber);
@@ -85,13 +84,13 @@ public sealed class ArchiveApiIntegrationTests
     {
         using var factory = new ApiTestFactory();
         using HttpClient client = factory.CreateClient();
-        using var request = new HttpRequestMessage(HttpMethod.Delete, "/api/archive/42");
+        using var request = new HttpRequestMessage(HttpMethod.Delete, "/api/tenants/1/archive/42");
         request.Headers.Add("X-Actor", "api-user");
 
         HttpResponseMessage response = await client.SendAsync(request);
 
         Assert.Equal(HttpStatusCode.Accepted, response.StatusCode);
-        Assert.Equal("/api/archive/42/metadata", response.Headers.Location?.AbsolutePath);
+        Assert.Equal("/api/tenants/1/archive/42/metadata", response.Headers.Location?.AbsolutePath);
         JsonDocument? body = await response.Content.ReadFromJsonAsync<JsonDocument>();
         Assert.NotNull(body);
         Assert.Equal(
@@ -107,7 +106,7 @@ public sealed class ArchiveApiIntegrationTests
         using HttpClient client = factory.CreateClient();
         using var request = new HttpRequestMessage(
             HttpMethod.Post,
-            "/api/archive/42/verify-integrity");
+            "/api/tenants/1/archive/42/verify-integrity");
         request.Headers.Add("X-Actor", "api-user");
 
         HttpResponseMessage response = await client.SendAsync(request);
@@ -140,7 +139,7 @@ public sealed class ArchiveApiIntegrationTests
 
         ArchiveIntegrityStatusResponse? response =
             await client.GetFromJsonAsync<ArchiveIntegrityStatusResponse>(
-                "/api/archive/42/integrity-status");
+                "/api/tenants/1/archive/42/integrity-status");
 
         Assert.NotNull(response);
         Assert.Equal(42, response.ArchiveObjectId);
@@ -157,10 +156,10 @@ public sealed class ArchiveApiIntegrationTests
         using HttpClient client = factory.CreateClient();
 
         JsonDocument? metadata = await client.GetFromJsonAsync<JsonDocument>(
-            "/api/archive/42/metadata");
+            "/api/tenants/1/archive/42/metadata");
         using var headRequest = new HttpRequestMessage(
             HttpMethod.Head,
-            "/api/archive/42");
+            "/api/tenants/1/archive/42");
         HttpResponseMessage headResponse = await client.SendAsync(headRequest);
 
         Assert.NotNull(metadata);
@@ -182,13 +181,13 @@ public sealed class ArchiveApiIntegrationTests
         using HttpClient client = factory.CreateClient();
 
         HttpResponseMessage response = await client.GetAsync(
-            "/api/archive/404/metadata");
+            "/api/tenants/1/archive/404/metadata");
 
         await AssertProblemAsync(
             response,
             HttpStatusCode.NotFound,
             "Archive object not found",
-            "/api/archive/404/metadata");
+            "/api/tenants/1/archive/404/metadata");
     }
 
     [Fact]
@@ -197,7 +196,7 @@ public sealed class ArchiveApiIntegrationTests
         using var factory = new ApiTestFactory();
         using HttpClient client = factory.CreateClient();
 
-        HttpResponseMessage response = await client.GetAsync("/api/archive/42");
+        HttpResponseMessage response = await client.GetAsync("/api/tenants/1/archive/42");
 
         Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
         Assert.Equal("application/problem+json", response.Content.Headers.ContentType?.MediaType);
@@ -225,7 +224,7 @@ public sealed class ArchiveApiIntegrationTests
         using HttpClient client = factory.CreateClient();
         using var request = new HttpRequestMessage(
             HttpMethod.Post,
-            "/api/archive/42/verify-integrity");
+            "/api/tenants/1/archive/42/verify-integrity");
         request.Headers.Add("X-Actor", "api-user");
 
         HttpResponseMessage response = await client.SendAsync(request);
@@ -234,7 +233,7 @@ public sealed class ArchiveApiIntegrationTests
             response,
             expectedStatus,
             expectedTitle,
-            "/api/archive/42/verify-integrity");
+            "/api/tenants/1/archive/42/verify-integrity");
         if ((int)expectedStatus >= 500)
         {
             Assert.DoesNotContain("sensitive provider detail", problem.Detail);
@@ -287,6 +286,7 @@ public sealed class ArchiveApiIntegrationTests
     private static ArchiveMetadataResult CreateMetadata(long archiveObjectId) =>
         new(
             archiveObjectId,
+            1,
             "objects/42",
             "cirrus-test",
             "document",

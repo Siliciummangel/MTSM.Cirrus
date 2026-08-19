@@ -14,6 +14,66 @@ namespace MTSM.Cirrus.Core.Tests;
 public sealed class ArchiveServiceIntegrationTests(PostgresFixture fixture)
 {
     [PostgresFact]
+    public async Task TenantBoundary_HidesForeignObjectsAcrossAllOperations()
+    {
+        await using CirrusDbContext dbContext = CreateDbContext();
+        var storage = new InMemoryObjectStorage();
+        ArchiveService service = CoreTestFactory.CreateService(dbContext, storage);
+        ArchiveFileResult archived = await service.ArchiveAsync(
+            CreateRequest("tenant secret"u8.ToArray(), tenantId: 1));
+
+        Assert.Null(await service.GetMetadataAsync(2, archived.ArchiveObjectId));
+        Assert.Null(await service.GetIntegrityStatusAsync(2, archived.ArchiveObjectId));
+        Assert.Empty((await service.SearchAsync(
+            2,
+            new ArchiveSearchRequest { ArchiveObjectId = archived.ArchiveObjectId })).Items);
+        await Assert.ThrowsAsync<ArchiveObjectNotFoundException>(() =>
+            service.DownloadAsync(2, archived.ArchiveObjectId, "foreign-reader"));
+        await Assert.ThrowsAsync<ArchiveObjectNotFoundException>(() =>
+            service.VerifyIntegrityAsync(2, archived.ArchiveObjectId, "foreign-verifier"));
+        await Assert.ThrowsAsync<ArchiveObjectNotFoundException>(() =>
+            service.RequestDeletionAsync(2, archived.ArchiveObjectId, "foreign-deleter"));
+
+        Assert.NotNull(await service.GetMetadataAsync(1, archived.ArchiveObjectId));
+    }
+
+    [PostgresFact]
+    public async Task BusinessReferences_AreTenantQueryableAndCannotCrossObjectTenant()
+    {
+        await using CirrusDbContext dbContext = CreateDbContext();
+        var storage = new InMemoryObjectStorage();
+        ArchiveService service = CoreTestFactory.CreateService(dbContext, storage);
+        int referenceTypeId = await GetReferenceTypeIdAsync(dbContext, "document-id");
+        ArchiveFileResult archived = await service.ArchiveAsync(
+            CreateRequest(
+                "statistics"u8.ToArray(),
+                references:
+                [new ArchiveBusinessReferenceInput(
+                    referenceTypeId,
+                    "SHIPMENT-123",
+                    "shipment")]));
+
+        int tenantShipmentCount = await dbContext.ArchiveBusinessReferences
+            .CountAsync(reference =>
+                reference.TenantId == 1
+                && reference.BusinessType == "shipment");
+        Assert.Equal(1, tenantShipmentCount);
+
+        dbContext.ChangeTracker.Clear();
+        dbContext.ArchiveBusinessReferences.Add(new ArchiveBusinessReference
+        {
+            TenantId = 2,
+            ArchiveObjectId = archived.ArchiveObjectId,
+            BusinessReferenceTypeId = referenceTypeId,
+            ReferenceValue = "ILLEGAL-CROSS-TENANT",
+            BusinessType = "shipment",
+            CreatedAt = DateTimeOffset.UtcNow
+        });
+
+        await Assert.ThrowsAsync<DbUpdateException>(() => dbContext.SaveChangesAsync());
+    }
+
+    [PostgresFact]
     public async Task ArchiveAsync_PersistsNormalizedMetadataHashSizeAndEvents()
     {
         await using CirrusDbContext dbContext = CreateDbContext();
@@ -35,8 +95,7 @@ public sealed class ArchiveServiceIntegrationTests(PostgresFixture fixture)
                     new ArchiveBusinessReferenceInput(
                         referenceTypeId,
                         "  DOC-42  ",
-                        "  invoice  ",
-                        "  tenant-a  ")
+                        "  invoice  ")
                 ]));
 
         dbContext.ChangeTracker.Clear();
@@ -55,12 +114,13 @@ public sealed class ArchiveServiceIntegrationTests(PostgresFixture fixture)
         Assert.Equal(Sha256(content), persisted.Sha256Hash);
         Assert.Equal("version-1", persisted.StorageVersionId);
         Assert.Equal("DOC-42", Assert.Single(persisted.BusinessReferences).ReferenceValue);
+        Assert.Equal(1, Assert.Single(persisted.BusinessReferences).TenantId);
         Assert.Equal(
             [ArchiveEventType.Created, ArchiveEventType.Archived],
             persisted.Events.OrderBy(item => item.EventTimestamp).Select(item => item.EventType));
         Assert.True(await storage.ExistsAsync(persisted.BucketName, persisted.ObjectKey));
 
-        ArchiveMetadataResult? metadata = await service.GetMetadataAsync(result.ArchiveObjectId);
+        ArchiveMetadataResult? metadata = await service.GetMetadataAsync(1, result.ArchiveObjectId);
         Assert.NotNull(metadata);
         Assert.Equal(result.Sha256Hash, metadata.Sha256Hash);
         Assert.Equal(2, metadata.Events.Count);
@@ -158,6 +218,7 @@ public sealed class ArchiveServiceIntegrationTests(PostgresFixture fixture)
         ArchiveFileResult archived = await service.ArchiveAsync(CreateRequest(content));
 
         ArchiveDownloadResult download = await service.DownloadAsync(
+            1,
             archived.ArchiveObjectId,
             "  downloader  ");
         await using Stream returnedStream = download.Content;
@@ -182,12 +243,12 @@ public sealed class ArchiveServiceIntegrationTests(PostgresFixture fixture)
         var storage = new InMemoryObjectStorage();
         ArchiveService service = CoreTestFactory.CreateService(dbContext, storage);
         ArchiveFileResult archived = await service.ArchiveAsync(CreateRequest("content"u8.ToArray()));
-        await service.RequestDeletionAsync(archived.ArchiveObjectId, "deleter");
+        await service.RequestDeletionAsync(1, archived.ArchiveObjectId, "deleter");
         storage.ReadException = new InvalidOperationException("Storage must not be called.");
 
         ArchiveObjectUnavailableException exception =
             await Assert.ThrowsAsync<ArchiveObjectUnavailableException>(() =>
-                service.DownloadAsync(archived.ArchiveObjectId, "downloader"));
+                service.DownloadAsync(1, archived.ArchiveObjectId, "downloader"));
 
         Assert.Equal(ArchiveStatus.DeletionRequested, exception.ArchiveStatus);
     }
@@ -204,6 +265,7 @@ public sealed class ArchiveServiceIntegrationTests(PostgresFixture fixture)
         storage.Replace(location.BucketName, location.ObjectKey, "tampered"u8.ToArray());
 
         ArchiveIntegrityResult result = await service.VerifyIntegrityAsync(
+            1,
             archived.ArchiveObjectId,
             "verifier");
 
@@ -230,9 +292,11 @@ public sealed class ArchiveServiceIntegrationTests(PostgresFixture fixture)
             CreateRequest("verified content"u8.ToArray()));
 
         ArchiveIntegrityResult verification = await service.VerifyIntegrityAsync(
+            1,
             archived.ArchiveObjectId,
             "integrity-operator");
         ArchiveIntegrityStatusResult? status = await service.GetIntegrityStatusAsync(
+            1,
             archived.ArchiveObjectId);
 
         Assert.True(verification.IsValid);
@@ -256,7 +320,7 @@ public sealed class ArchiveServiceIntegrationTests(PostgresFixture fixture)
             new IOException("provider details"));
 
         await Assert.ThrowsAsync<ArchiveException>(() =>
-            service.VerifyIntegrityAsync(archived.ArchiveObjectId, "verifier"));
+            service.VerifyIntegrityAsync(1, archived.ArchiveObjectId, "verifier"));
 
         dbContext.ChangeTracker.Clear();
         int resultEvents = await dbContext.ArchiveEvents.CountAsync(item =>
@@ -275,11 +339,13 @@ public sealed class ArchiveServiceIntegrationTests(PostgresFixture fixture)
         string source = $"status-search-{Guid.NewGuid():N}";
         ArchiveFileResult archived = await service.ArchiveAsync(
             CreateRequest("content"u8.ToArray(), sourceSystem: source));
-        await service.RequestDeletionAsync(archived.ArchiveObjectId, "deleter");
+        await service.RequestDeletionAsync(1, archived.ArchiveObjectId, "deleter");
 
         ArchiveSearchResult defaultResult = await service.SearchAsync(
+            1,
             new ArchiveSearchRequest { SourceSystem = source });
         ArchiveSearchResult explicitResult = await service.SearchAsync(
+            1,
             new ArchiveSearchRequest
             {
                 SourceSystem = source,
@@ -305,20 +371,18 @@ public sealed class ArchiveServiceIntegrationTests(PostgresFixture fixture)
                 sourceSystem: source,
                 references:
                 [
-                    new ArchiveBusinessReferenceInput(documentTypeId, "DOC-1", "invoice", "tenant-a"),
-                    new ArchiveBusinessReferenceInput(caseTypeId, "CASE-1", "case", "tenant-b")
+                    new ArchiveBusinessReferenceInput(documentTypeId, "DOC-1", "invoice"),
+                    new ArchiveBusinessReferenceInput(caseTypeId, "CASE-1", "case")
                 ]));
 
-        ArchiveSearchResult mismatched = await service.SearchAsync(new ArchiveSearchRequest
+        ArchiveSearchResult mismatched = await service.SearchAsync(1, new ArchiveSearchRequest
         {
             SourceSystem = source,
-            Tenant = "tenant-a",
-            BusinessReferenceValue = "CASE-1"
+            BusinessReferenceValue = "missing"
         });
-        ArchiveSearchResult matched = await service.SearchAsync(new ArchiveSearchRequest
+        ArchiveSearchResult matched = await service.SearchAsync(1, new ArchiveSearchRequest
         {
             SourceSystem = source,
-            Tenant = "tenant-b",
             BusinessReferenceValue = "CASE-1",
             BusinessReferenceTypeId = caseTypeId
         });
@@ -338,19 +402,19 @@ public sealed class ArchiveServiceIntegrationTests(PostgresFixture fixture)
         await service.ArchiveAsync(CreateRequest("two"u8.ToArray(), "literalXXname.txt", sourceSystem: source));
         await service.ArchiveAsync(CreateRequest("three"u8.ToArray(), "third.txt", sourceSystem: source));
 
-        ArchiveSearchResult literal = await service.SearchAsync(new ArchiveSearchRequest
+        ArchiveSearchResult literal = await service.SearchAsync(1, new ArchiveSearchRequest
         {
             SourceSystem = source,
             OriginalFilename = "%_",
             PageSize = 10
         });
-        ArchiveSearchResult firstPage = await service.SearchAsync(new ArchiveSearchRequest
+        ArchiveSearchResult firstPage = await service.SearchAsync(1, new ArchiveSearchRequest
         {
             SourceSystem = source,
             PageNumber = 1,
             PageSize = 2
         });
-        ArchiveSearchResult secondPage = await service.SearchAsync(new ArchiveSearchRequest
+        ArchiveSearchResult secondPage = await service.SearchAsync(1, new ArchiveSearchRequest
         {
             SourceSystem = source,
             PageNumber = 2,
@@ -385,8 +449,8 @@ public sealed class ArchiveServiceIntegrationTests(PostgresFixture fixture)
         ArchiveService secondService = CoreTestFactory.CreateService(secondContext, storage);
 
         ArchiveDeletionRequestResult[] results = await Task.WhenAll(
-            firstService.RequestDeletionAsync(archiveObjectId, "actor-one"),
-            secondService.RequestDeletionAsync(archiveObjectId, "actor-two"));
+            firstService.RequestDeletionAsync(1, archiveObjectId, "actor-one"),
+            secondService.RequestDeletionAsync(1, archiveObjectId, "actor-two"));
 
         Assert.Single(results, result => result.StateChanged);
         Assert.Single(results, result => !result.StateChanged);
@@ -423,6 +487,7 @@ public sealed class ArchiveServiceIntegrationTests(PostgresFixture fixture)
         string fileType = "document",
         string? partner = null,
         string actor = "integration-suite",
+        long tenantId = 1,
         IReadOnlyCollection<ArchiveBusinessReferenceInput>? references = null)
     {
         return new ArchiveFileRequest
@@ -433,7 +498,7 @@ public sealed class ArchiveServiceIntegrationTests(PostgresFixture fixture)
             MimeType = "application/octet-stream",
             SourceSystem = sourceSystem ?? $"source-{Guid.NewGuid():N}",
             Partner = partner,
-            Tenant = "tenant-a",
+            TenantId = tenantId,
             ReceivedAt = DateTimeOffset.UtcNow.AddMinutes(-1),
             CreatedBy = actor,
             RetentionUntil = DateOnly.FromDateTime(DateTime.UtcNow.AddYears(10)),

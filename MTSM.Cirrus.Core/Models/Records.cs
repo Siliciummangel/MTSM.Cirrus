@@ -10,11 +10,11 @@ public sealed record ObjectStorageWriteResult(
 public sealed record ArchiveBusinessReferenceInput(
     int BusinessReferenceTypeId,
     string ReferenceValue,
-    string BusinessType,
-    string Tenant);
+    string BusinessType);
 
 public sealed record ArchiveFileResult(
     long ArchiveObjectId,
+    long TenantId,
     string ObjectKey,
     string Sha256Hash,
     long SizeBytes,
@@ -32,7 +32,6 @@ public sealed record ArchiveBusinessReferenceResult(
     int BusinessReferenceTypeId,
     string ReferenceValue,
     string BusinessType,
-    string Tenant,
     DateTimeOffset CreatedAt);
 
 public sealed record ArchiveEventResult(
@@ -44,6 +43,7 @@ public sealed record ArchiveEventResult(
 
 public sealed record ArchiveMetadataResult(
     long ArchiveObjectId,
+    long TenantId,
     string ObjectKey,
     string BucketName,
     string FileType,
@@ -70,6 +70,7 @@ public sealed record ArchiveMetadataResult(
 
 public sealed record ArchiveSearchItem(
     long ArchiveObjectId,
+    long TenantId,
     string FileType,
     string? MimeType,
     string SourceSystem,

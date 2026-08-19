@@ -13,6 +13,7 @@ public static class ArchiveResponseMapper
 
         return new ArchiveFileResponse(
             result.ArchiveObjectId,
+            result.TenantId,
             result.ObjectKey,
             result.Sha256Hash,
             result.SizeBytes,
@@ -31,7 +32,6 @@ public static class ArchiveResponseMapper
                         reference.BusinessReferenceTypeId,
                         reference.ReferenceValue,
                         reference.BusinessType,
-                        reference.Tenant,
                         reference.CreatedAt))
                 .ToArray();
 
@@ -49,6 +49,7 @@ public static class ArchiveResponseMapper
 
         return new ArchiveMetadataResponse(
             result.ArchiveObjectId,
+            result.TenantId,
             result.ObjectKey,
             result.BucketName,
             result.FileType,
@@ -98,6 +99,7 @@ public static class ArchiveResponseMapper
                 .Select(item =>
                     new ArchiveSearchItemResponse(
                         item.ArchiveObjectId,
+                        item.TenantId,
                         item.FileType,
                         item.MimeType,
                         item.SourceSystem,
@@ -117,7 +119,6 @@ public static class ArchiveResponseMapper
                                     reference.BusinessReferenceTypeId,
                                     reference.ReferenceValue,
                                     reference.BusinessType,
-                                    reference.Tenant,
                                     reference.CreatedAt))
                             .ToArray()))
                 .ToArray();

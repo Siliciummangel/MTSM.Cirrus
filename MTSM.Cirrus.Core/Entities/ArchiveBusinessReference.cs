@@ -2,6 +2,8 @@
 
 public sealed class ArchiveBusinessReference
 {
+    public long TenantId { get; set; }
+
     public long ArchiveObjectId { get; set; }
 
     public int BusinessReferenceTypeId { get; set; }
@@ -9,8 +11,6 @@ public sealed class ArchiveBusinessReference
     public required string ReferenceValue { get; set; }
 
     public required string BusinessType { get; set; }
-
-    public required string Tenant { get; set; }
 
     public DateTimeOffset CreatedAt { get; set; }
 

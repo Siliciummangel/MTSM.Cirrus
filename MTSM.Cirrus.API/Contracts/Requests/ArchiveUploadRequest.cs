@@ -23,11 +23,6 @@ public sealed class ArchiveUploadRequest
     [FromForm(Name = "partner")]
     public string? Partner { get; init; }
 
-    [Required]
-    [StringLength(100)]
-    [FromForm(Name = "tenant")]
-    public string Tenant { get; init; } = string.Empty;
-
     [FromForm(Name = "receivedAt")]
     public DateTimeOffset? ReceivedAt { get; init; }
 

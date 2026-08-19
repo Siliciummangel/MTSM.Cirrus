@@ -8,7 +8,7 @@ using MTSM.Cirrus.Core.Models;
 namespace MTSM.Cirrus.API.Controllers;
 
 [ApiController]
-[Route("api/archive")]
+[Route("api/tenants/{tenantId:long}/archive")]
 public sealed class ArchiveController : ControllerBase
 {
     private const string ActorHeaderName = "X-Actor";
@@ -38,6 +38,7 @@ public sealed class ArchiveController : ControllerBase
     [ProducesResponseType<ProblemDetails>(
         StatusCodes.Status500InternalServerError)]
     public async Task<ActionResult<ArchiveFileResponse>> ArchiveAsync(
+        [FromRoute] long tenantId,
         [FromForm] ArchiveUploadRequest request,
         CancellationToken cancellationToken)
     {
@@ -60,8 +61,7 @@ public sealed class ArchiveController : ControllerBase
                     new ArchiveBusinessReferenceInput(
                         reference.BusinessReferenceTypeId,
                         reference.ReferenceValue.Trim(),
-                        reference.BusinessType.Trim(),
-                        reference.Tenant.Trim()))
+                        reference.BusinessType.Trim()))
                 .ToArray();
 
         await using Stream content =
@@ -90,8 +90,7 @@ public sealed class ArchiveController : ControllerBase
                     NormalizeOptionalValue(
                         request.Partner),
 
-                Tenant =
-                    request.Tenant.Trim(),
+                TenantId = tenantId,
 
                 ReceivedAt =
                     receivedAt,
@@ -126,8 +125,9 @@ public sealed class ArchiveController : ControllerBase
         return CreatedAtRoute(
             "GetArchiveMetadata",
             new
-            {
-                archiveObjectId =
+                {
+                    tenantId,
+                    archiveObjectId =
                     response.ArchiveObjectId
             },
             response);
@@ -147,6 +147,7 @@ public sealed class ArchiveController : ControllerBase
     [ProducesResponseType<ProblemDetails>(
         StatusCodes.Status500InternalServerError)]
     public async Task<IActionResult> DownloadAsync(
+        [FromRoute] long tenantId,
         [FromRoute] long archiveObjectId,
         [FromHeader(Name = ActorHeaderName)] string? actor,
         CancellationToken cancellationToken)
@@ -162,6 +163,7 @@ public sealed class ArchiveController : ControllerBase
 
         ArchiveDownloadResult result =
             await _archiveService.DownloadAsync(
+                tenantId,
                 archiveObjectId,
                 actor.Trim(),
                 cancellationToken);
@@ -210,6 +212,7 @@ public sealed class ArchiveController : ControllerBase
         StatusCodes.Status500InternalServerError)]
     public async Task<ActionResult<ArchiveDeletionRequestResponse>>
         RequestDeletionAsync(
+            [FromRoute] long tenantId,
             [FromRoute] long archiveObjectId,
             [FromHeader(Name = ActorHeaderName)] string? actor,
             CancellationToken cancellationToken)
@@ -225,6 +228,7 @@ public sealed class ArchiveController : ControllerBase
 
         ArchiveDeletionRequestResult result =
             await _archiveService.RequestDeletionAsync(
+                tenantId,
                 archiveObjectId,
                 actor.Trim(),
                 cancellationToken);
@@ -235,8 +239,9 @@ public sealed class ArchiveController : ControllerBase
         return AcceptedAtRoute(
             "GetArchiveMetadata",
             new
-            {
-                archiveObjectId =
+                {
+                    tenantId,
+                    archiveObjectId =
                     response.ArchiveObjectId
             },
             response);
@@ -253,13 +258,13 @@ public sealed class ArchiveController : ControllerBase
     [ProducesResponseType<ProblemDetails>(
         StatusCodes.Status500InternalServerError)]
     public async Task<ActionResult<ArchiveSearchResponse>> SearchAsync(
+        [FromRoute] long tenantId,
         [FromQuery] ArchiveSearchQuery query,
         CancellationToken cancellationToken)
     {
         var request = new ArchiveSearchRequest
         {
             ArchiveObjectId = query.ArchiveObjectId,
-            Tenant = NormalizeOptionalValue(query.Tenant),
             FileType = NormalizeOptionalValue(query.FileType),
             SourceSystem = NormalizeOptionalValue(query.SourceSystem),
             Partner = NormalizeOptionalValue(query.Partner),
@@ -280,6 +285,7 @@ public sealed class ArchiveController : ControllerBase
 
         ArchiveSearchResult result =
             await _archiveService.SearchAsync(
+                tenantId,
                 request,
                 cancellationToken);
 
@@ -308,6 +314,7 @@ public sealed class ArchiveController : ControllerBase
         StatusCodes.Status500InternalServerError)]
     public async Task<ActionResult<ArchiveIntegrityResponse>>
         VerifyIntegrityAsync(
+            [FromRoute] long tenantId,
             [FromRoute] long archiveObjectId,
             [FromHeader(Name = ActorHeaderName)] string? actor,
             CancellationToken cancellationToken)
@@ -323,6 +330,7 @@ public sealed class ArchiveController : ControllerBase
 
         ArchiveIntegrityResult result =
             await _archiveService.VerifyIntegrityAsync(
+                tenantId,
                 archiveObjectId,
                 actor.Trim(),
                 cancellationToken);
@@ -344,11 +352,13 @@ public sealed class ArchiveController : ControllerBase
         StatusCodes.Status500InternalServerError)]
     public async Task<ActionResult<ArchiveIntegrityStatusResponse>>
         GetIntegrityStatusAsync(
+            [FromRoute] long tenantId,
             [FromRoute] long archiveObjectId,
             CancellationToken cancellationToken)
     {
         ArchiveIntegrityStatusResult? result =
             await _archiveService.GetIntegrityStatusAsync(
+                tenantId,
                 archiveObjectId,
                 cancellationToken);
 
@@ -381,11 +391,13 @@ public sealed class ArchiveController : ControllerBase
         StatusCodes.Status500InternalServerError)]
     public async Task<ActionResult<ArchiveMetadataResponse>>
         GetMetadataAsync(
+            [FromRoute] long tenantId,
             [FromRoute] long archiveObjectId,
             CancellationToken cancellationToken)
     {
         ArchiveMetadataResult? metadata =
             await _archiveService.GetMetadataAsync(
+                tenantId,
                 archiveObjectId,
                 cancellationToken);
 
@@ -421,11 +433,13 @@ public sealed class ArchiveController : ControllerBase
     [ProducesResponseType(StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status404NotFound)]
     public async Task<IActionResult> ExistsAsync(
+        [FromRoute] long tenantId,
         [FromRoute] long archiveObjectId,
         CancellationToken cancellationToken)
     {
         ArchiveMetadataResult? metadata =
             await _archiveService.GetMetadataAsync(
+                tenantId,
                 archiveObjectId,
                 cancellationToken);
 

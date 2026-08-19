@@ -6,8 +6,6 @@ public sealed class ArchiveSearchRequest
 {
     public long? ArchiveObjectId { get; init; }
 
-    public string? Tenant { get; init; }
-
     public string? FileType { get; init; }
 
     public string? SourceSystem { get; init; }

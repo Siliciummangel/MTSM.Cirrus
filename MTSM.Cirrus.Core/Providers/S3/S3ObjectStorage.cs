@@ -45,6 +45,7 @@ public sealed class S3ObjectStorage : IObjectStorage, IDisposable
         string objectKey,
         Stream content,
         string? contentType,
+        string? encryptionKeyId = null,
         CancellationToken cancellationToken = default)
     {
         ThrowIfDisposed();
@@ -85,6 +86,14 @@ public sealed class S3ObjectStorage : IObjectStorage, IDisposable
                 ? "application/octet-stream"
                 : normalizedContentType
         };
+
+        if (!string.IsNullOrWhiteSpace(encryptionKeyId))
+        {
+            request.ServerSideEncryptionMethod =
+                ServerSideEncryptionMethod.AWSKMS;
+            request.ServerSideEncryptionKeyManagementServiceKeyId =
+                encryptionKeyId.Trim();
+        }
 
         try
         {

@@ -3,6 +3,7 @@ using Microsoft.AspNetCore.Mvc.Testing;
 using Microsoft.AspNetCore.TestHost;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
+using Microsoft.Extensions.Logging;
 using MTSM.Cirrus.Core.Abstractions;
 using MTSM.Cirrus.Core.Models;
 
@@ -15,6 +16,7 @@ internal sealed class ApiTestFactory : WebApplicationFactory<Program>
     protected override void ConfigureWebHost(IWebHostBuilder builder)
     {
         builder.UseEnvironment("Testing");
+        builder.ConfigureLogging(logging => logging.ClearProviders());
         builder.ConfigureTestServices(services =>
         {
             services.RemoveAll<IArchiveService>();
@@ -28,11 +30,13 @@ internal sealed class ApiArchiveService : IArchiveService
     public ArchiveFileRequest? LastArchiveRequest { get; private set; }
 
     public string? LastActor { get; private set; }
+    public long? LastTenantId { get; private set; }
 
     public Func<ArchiveFileRequest, CancellationToken, Task<ArchiveFileResult>>
         ArchiveHandler { get; set; } = (_, _) =>
             Task.FromResult(new ArchiveFileResult(
                 42,
+                1,
                 "objects/42",
                 new string('a', 64),
                 7,
@@ -90,43 +94,61 @@ internal sealed class ApiArchiveService : IArchiveService
     }
 
     public Task<ArchiveDownloadResult> DownloadAsync(
+        long tenantId,
         long archiveObjectId,
         string actor,
         CancellationToken cancellationToken = default)
     {
+        LastTenantId = tenantId;
         LastActor = actor;
         return DownloadHandler(archiveObjectId, actor, cancellationToken);
     }
 
     public Task<ArchiveMetadataResult?> GetMetadataAsync(
+        long tenantId,
         long archiveObjectId,
-        CancellationToken cancellationToken = default) =>
-        MetadataHandler(archiveObjectId, cancellationToken);
+        CancellationToken cancellationToken = default)
+    {
+        LastTenantId = tenantId;
+        return MetadataHandler(archiveObjectId, cancellationToken);
+    }
 
     public Task<ArchiveSearchResult> SearchAsync(
+        long tenantId,
         ArchiveSearchRequest request,
-        CancellationToken cancellationToken = default) =>
-        SearchHandler(request, cancellationToken);
+        CancellationToken cancellationToken = default)
+    {
+        LastTenantId = tenantId;
+        return SearchHandler(request, cancellationToken);
+    }
 
     public Task<ArchiveIntegrityResult> VerifyIntegrityAsync(
+        long tenantId,
         long archiveObjectId,
         string actor,
         CancellationToken cancellationToken = default)
     {
+        LastTenantId = tenantId;
         LastActor = actor;
         return IntegrityHandler(archiveObjectId, actor, cancellationToken);
     }
 
     public Task<ArchiveIntegrityStatusResult?> GetIntegrityStatusAsync(
+        long tenantId,
         long archiveObjectId,
-        CancellationToken cancellationToken = default) =>
-        IntegrityStatusHandler(archiveObjectId, cancellationToken);
+        CancellationToken cancellationToken = default)
+    {
+        LastTenantId = tenantId;
+        return IntegrityStatusHandler(archiveObjectId, cancellationToken);
+    }
 
     public Task<ArchiveDeletionRequestResult> RequestDeletionAsync(
+        long tenantId,
         long archiveObjectId,
         string actor,
         CancellationToken cancellationToken = default)
     {
+        LastTenantId = tenantId;
         LastActor = actor;
         return DeletionHandler(archiveObjectId, actor, cancellationToken);
     }

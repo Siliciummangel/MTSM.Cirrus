@@ -38,8 +38,17 @@ public sealed class ArchiveObjectConfiguration
 
         builder.HasKey(x => x.ArchiveObjectId);
 
+        builder.HasAlternateKey(x => new
+        {
+            x.TenantId,
+            x.ArchiveObjectId
+        });
+
         builder.Property(x => x.ArchiveObjectId)
             .ValueGeneratedOnAdd();
+
+        builder.Property(x => x.TenantId)
+            .IsRequired();
 
         builder.Property(x => x.ObjectKey)
             .HasMaxLength(1024)
@@ -123,10 +132,14 @@ public sealed class ArchiveObjectConfiguration
 
         builder.HasIndex(x => new
         {
+            x.TenantId,
             x.BucketName,
             x.ObjectKey
         })
         .IsUnique();
+
+        builder.HasIndex(x => new { x.TenantId, x.ArchiveStatus });
+        builder.HasIndex(x => new { x.TenantId, x.ReceivedAt });
 
         builder.HasIndex(x => x.Sha256Hash);
 
@@ -163,6 +176,11 @@ public sealed class ArchiveObjectConfiguration
         builder.HasOne(x => x.RetentionPolicy)
             .WithMany(x => x.ArchiveObjects)
             .HasForeignKey(x => x.RetentionPolicyId)
+            .OnDelete(DeleteBehavior.Restrict);
+
+        builder.HasOne(x => x.Tenant)
+            .WithMany(x => x.ArchiveObjects)
+            .HasForeignKey(x => x.TenantId)
             .OnDelete(DeleteBehavior.Restrict);
     }
 }

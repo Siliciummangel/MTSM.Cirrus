@@ -1,8 +1,6 @@
 ﻿using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;
-using Microsoft.Extensions.Options;
 using MTSM.Cirrus.Core.Abstractions;
-using MTSM.Cirrus.Core.Config;
 using MTSM.Cirrus.Core.Data;
 using MTSM.Cirrus.Core.Entities;
 using MTSM.Cirrus.Core.Enums;
@@ -27,22 +25,18 @@ public sealed class ArchiveService : IArchiveService
     private const int MaximumOriginalFilenameLength = 1024;
     private const int MaximumPartnerLength = 255;
     private const int MaximumSourceSystemLength = 255;
-    private const int MaximumTenantLength = 50;
 
     private readonly CirrusDbContext _dbContext;
     private readonly IObjectStorage _objectStorage;
-    private readonly ArchiveOptions _options;
     private readonly ILogger<ArchiveService> _logger;
 
     public ArchiveService(
         CirrusDbContext dbContext,
         IObjectStorage objectStorage,
-        IOptions<ArchiveOptions> options,
         ILogger<ArchiveService> logger)
     {
         _dbContext = dbContext;
         _objectStorage = objectStorage;
-        _options = options.Value;
         _logger = logger;
     }
 
@@ -61,11 +55,14 @@ public sealed class ArchiveService : IArchiveService
         string createdBy = request.CreatedBy.Trim();
 
         DateOnly retentionUntil;
+        Tenant tenant;
 
         try
         {
+            tenant = await GetActiveTenantAsync(request.TenantId, cancellationToken);
             retentionUntil = await ResolveRetentionUntilAsync(
                 request,
+                tenant,
                 cancellationToken);
 
             await ValidateBusinessReferenceTypesAsync(
@@ -93,13 +90,15 @@ public sealed class ArchiveService : IArchiveService
         }
 
         string objectKey = CreateObjectKey(
-            request,
+            tenant,
+            fileType,
             now);
 
         var archiveObject = new ArchiveObject
         {
+            TenantId = tenant.TenantId,
             ObjectKey = objectKey,
-            BucketName = _options.BucketName.Trim(),
+            BucketName = tenant.BucketName,
 
             FileType = fileType,
             MimeType = mimeType,
@@ -112,12 +111,14 @@ public sealed class ArchiveService : IArchiveService
             ReceivedAt = request.ReceivedAt,
             ArchivedAt = null,
 
-            RetentionPolicyId = request.RetentionPolicyId,
+            RetentionPolicyId = request.RetentionPolicyId
+                ?? tenant.DefaultRetentionPolicyId,
             RetentionUntil = retentionUntil,
 
             ArchiveStatus = ArchiveStatus.Pending,
 
             IsWormProtected = false,
+            EncryptionKeyId = tenant.EncryptionKeyId,
             CreatedBy = createdBy
         };
 
@@ -167,6 +168,7 @@ public sealed class ArchiveService : IArchiveService
                     archiveObject.ObjectKey,
                     hashingStream,
                     archiveObject.MimeType,
+                    archiveObject.EncryptionKeyId,
                     cancellationToken);
 
             string sha256Hash = hashingStream.GetHashHex();
@@ -196,6 +198,7 @@ public sealed class ArchiveService : IArchiveService
 
             return new ArchiveFileResult(
                 archiveObject.ArchiveObjectId,
+                archiveObject.TenantId,
                 archiveObject.ObjectKey,
                 archiveObject.Sha256Hash,
                 archiveObject.SizeBytes,
@@ -244,6 +247,7 @@ public sealed class ArchiveService : IArchiveService
     }
 
     public async Task<ArchiveDownloadResult> DownloadAsync(
+        long tenantId,
         long archiveObjectId,
         string actor,
         CancellationToken cancellationToken = default)
@@ -256,6 +260,7 @@ public sealed class ArchiveService : IArchiveService
 
         ArchiveObject archiveObject =
             await GetActiveArchiveObjectAsync(
+                tenantId,
                 archiveObjectId,
                 cancellationToken);
 
@@ -348,17 +353,22 @@ public sealed class ArchiveService : IArchiveService
     }
 
     public async Task<ArchiveMetadataResult?> GetMetadataAsync(
+        long tenantId,
         long archiveObjectId,
         CancellationToken cancellationToken = default)
     {
         ValidateArchiveObjectId(archiveObjectId);
+        ValidateTenantId(tenantId);
 
         return await _dbContext.ArchiveObjects
             .AsNoTracking()
             .Where(x =>
-                x.ArchiveObjectId == archiveObjectId)
+                x.TenantId == tenantId
+                && x.Tenant.Status != TenantStatus.Disabled
+                && x.ArchiveObjectId == archiveObjectId)
             .Select(x => new ArchiveMetadataResult(
                 x.ArchiveObjectId,
+                x.TenantId,
                 x.ObjectKey,
                 x.BucketName,
                 x.FileType,
@@ -391,7 +401,6 @@ public sealed class ArchiveService : IArchiveService
                             reference.BusinessReferenceTypeId,
                             reference.ReferenceValue,
                             reference.BusinessType,
-                            reference.Tenant,
                             reference.CreatedAt))
                     .ToArray(),
 
@@ -410,17 +419,22 @@ public sealed class ArchiveService : IArchiveService
     }
 
     public async Task<ArchiveSearchResult> SearchAsync(
+        long tenantId,
         ArchiveSearchRequest request,
         CancellationToken cancellationToken = default)
     {
         ValidateSearchRequest(request);
+        ValidateTenantId(tenantId);
 
         IQueryable<ArchiveObject> query =
             _dbContext.ArchiveObjects
-                .AsNoTracking();
+                .AsNoTracking()
+                .Where(x => x.TenantId == tenantId
+                    && x.Tenant.Status != TenantStatus.Disabled);
 
         query = ApplySearchFilters(
             query,
+            tenantId,
             request);
 
         long totalCount =
@@ -441,6 +455,7 @@ public sealed class ArchiveService : IArchiveService
                 .Take(request.PageSize)
                 .Select(x => new ArchiveSearchItem(
                     x.ArchiveObjectId,
+                    x.TenantId,
                     x.FileType,
                     x.MimeType,
                     x.SourceSystem,
@@ -465,7 +480,6 @@ public sealed class ArchiveService : IArchiveService
                                 reference.BusinessReferenceTypeId,
                                 reference.ReferenceValue,
                                 reference.BusinessType,
-                                reference.Tenant,
                                 reference.CreatedAt))
                         .ToArray()))
                 .ToArrayAsync(cancellationToken);
@@ -479,6 +493,7 @@ public sealed class ArchiveService : IArchiveService
     }
 
     public async Task<ArchiveIntegrityResult> VerifyIntegrityAsync(
+        long tenantId,
         long archiveObjectId,
         string actor,
         CancellationToken cancellationToken = default)
@@ -491,6 +506,7 @@ public sealed class ArchiveService : IArchiveService
 
         ArchiveObject archiveObject =
             await GetActiveArchiveObjectAsync(
+                tenantId,
                 archiveObjectId,
                 cancellationToken);
 
@@ -677,16 +693,20 @@ public sealed class ArchiveService : IArchiveService
     }
 
     public async Task<ArchiveIntegrityStatusResult?> GetIntegrityStatusAsync(
+        long tenantId,
         long archiveObjectId,
         CancellationToken cancellationToken = default)
     {
         ValidateArchiveObjectId(archiveObjectId);
+        ValidateTenantId(tenantId);
 
         ArchiveObject? archiveObject =
             await _dbContext.ArchiveObjects
                 .AsNoTracking()
                 .SingleOrDefaultAsync(
-                    item => item.ArchiveObjectId == archiveObjectId,
+                    item => item.TenantId == tenantId
+                        && item.Tenant.Status != TenantStatus.Disabled
+                        && item.ArchiveObjectId == archiveObjectId,
                     cancellationToken);
 
         if (archiveObject is null)
@@ -729,11 +749,13 @@ public sealed class ArchiveService : IArchiveService
     }
 
     public async Task<ArchiveDeletionRequestResult> RequestDeletionAsync(
+        long tenantId,
         long archiveObjectId,
         string actor,
         CancellationToken cancellationToken = default)
     {
         ValidateArchiveObjectId(archiveObjectId);
+        ValidateTenantId(tenantId);
         string normalizedActor = NormalizeRequiredValue(
             actor,
             nameof(actor),
@@ -759,7 +781,13 @@ public sealed class ArchiveService : IArchiveService
                                 $"""
                             SELECT *
                             FROM cirrus.archive_object
-                            WHERE archive_object_id = {archiveObjectId}
+                            WHERE tenant_id = {tenantId}
+                              AND archive_object_id = {archiveObjectId}
+                              AND EXISTS (
+                                  SELECT 1
+                                  FROM cirrus.tenant
+                                  WHERE tenant.tenant_id = archive_object.tenant_id
+                                    AND tenant.status <> 'Disabled')
                             FOR UPDATE
                             """)
                             .SingleOrDefaultAsync(cancellationToken);
@@ -882,16 +910,20 @@ public sealed class ArchiveService : IArchiveService
     }
 
     private async Task<ArchiveObject> GetActiveArchiveObjectAsync(
+        long tenantId,
         long archiveObjectId,
         CancellationToken cancellationToken)
     {
+        ValidateTenantId(tenantId);
         ArchiveObject? archiveObject;
 
         try
         {
             archiveObject = await _dbContext.ArchiveObjects
                 .SingleOrDefaultAsync(
-                    x => x.ArchiveObjectId == archiveObjectId,
+                    x => x.TenantId == tenantId
+                        && x.Tenant.Status != TenantStatus.Disabled
+                        && x.ArchiveObjectId == archiveObjectId,
                     cancellationToken);
         }
         catch (OperationCanceledException)
@@ -934,8 +966,39 @@ public sealed class ArchiveService : IArchiveService
         return archiveObject;
     }
 
+    private async Task<Tenant> GetActiveTenantAsync(
+        long tenantId,
+        CancellationToken cancellationToken)
+    {
+        ValidateTenantId(tenantId);
+        Tenant? tenant = _dbContext.Tenants.Local
+            .SingleOrDefault(item => item.TenantId == tenantId);
+
+        tenant ??= await _dbContext.Tenants
+                .AsNoTracking()
+                .SingleOrDefaultAsync(
+                    item => item.TenantId == tenantId,
+                    cancellationToken);
+
+        if (tenant is null)
+        {
+            throw new ArgumentException(
+                $"Tenant '{tenantId}' does not exist.",
+                nameof(tenantId));
+        }
+
+        if (tenant.Status != TenantStatus.Active)
+        {
+            throw new ArchiveException(
+                $"Tenant '{tenantId}' is not active.");
+        }
+
+        return tenant;
+    }
+
     private static IQueryable<ArchiveObject> ApplySearchFilters(
         IQueryable<ArchiveObject> query,
+        long tenantId,
         ArchiveSearchRequest request)
     {
         if (request.ArchiveObjectId is not null)
@@ -1042,14 +1105,12 @@ public sealed class ArchiveService : IArchiveService
         }
 
         bool hasBusinessReferenceFilter =
-            !string.IsNullOrWhiteSpace(request.Tenant)
-            || request.BusinessReferenceTypeId is not null
+            request.BusinessReferenceTypeId is not null
             || !string.IsNullOrWhiteSpace(request.BusinessReferenceValue)
             || !string.IsNullOrWhiteSpace(request.BusinessType);
 
         if (hasBusinessReferenceFilter)
         {
-            string? tenant = NormalizeOptionalValue(request.Tenant);
             int? referenceTypeId = request.BusinessReferenceTypeId;
             string? referenceValue =
                 NormalizeOptionalValue(request.BusinessReferenceValue);
@@ -1058,7 +1119,7 @@ public sealed class ArchiveService : IArchiveService
 
             query = query.Where(x =>
                 x.BusinessReferences.Any(reference =>
-                    (tenant == null || reference.Tenant == tenant)
+                    reference.TenantId == tenantId
                     && (referenceTypeId == null
                         || reference.BusinessReferenceTypeId == referenceTypeId)
                     && (referenceValue == null
@@ -1072,22 +1133,26 @@ public sealed class ArchiveService : IArchiveService
 
     private async Task<DateOnly> ResolveRetentionUntilAsync(
         ArchiveFileRequest request,
+        Tenant tenant,
         CancellationToken cancellationToken)
     {
         RetentionPolicy? policy = null;
 
-        if (request.RetentionPolicyId is not null)
+        int? retentionPolicyId = request.RetentionPolicyId
+            ?? tenant.DefaultRetentionPolicyId;
+
+        if (retentionPolicyId is not null)
         {
             policy = await _dbContext.RetentionPolicies
                 .AsNoTracking()
                 .SingleOrDefaultAsync(
-                    x => x.RetentionPolicyId == request.RetentionPolicyId.Value,
+                    x => x.RetentionPolicyId == retentionPolicyId.Value,
                     cancellationToken);
 
             if (policy is null)
             {
                 throw new ArgumentException(
-                    $"Retention policy {request.RetentionPolicyId} does not exist.",
+                    $"Retention policy {retentionPolicyId} does not exist.",
                     nameof(request));
             }
         }
@@ -1097,9 +1162,17 @@ public sealed class ArchiveService : IArchiveService
             return request.RetentionUntil.Value;
         }
 
+        if (policy is null)
+        {
+            throw new ArgumentException(
+                "Either RetentionUntil, RetentionPolicyId or a tenant default " +
+                "retention policy must be supplied.",
+                nameof(request));
+        }
+
         DateTime retentionBase = request.ReceivedAt.UtcDateTime;
 
-        if (policy!.RetentionYears > DateTime.MaxValue.Year - retentionBase.Year)
+        if (policy.RetentionYears > DateTime.MaxValue.Year - retentionBase.Year)
         {
             throw new ArchiveException(
                 $"Retention policy {policy.RetentionPolicyId} exceeds the supported date range.");
@@ -1120,6 +1193,8 @@ public sealed class ArchiveService : IArchiveService
             archiveObject.BusinessReferences.Add(
                 new ArchiveBusinessReference
                 {
+                    TenantId = archiveObject.TenantId,
+
                     BusinessReferenceTypeId =
                         reference.BusinessReferenceTypeId,
 
@@ -1128,9 +1203,6 @@ public sealed class ArchiveService : IArchiveService
 
                     BusinessType =
                         reference.BusinessType.Trim(),
-
-                    Tenant =
-                        reference.Tenant.Trim(),
 
                     CreatedAt = createdAt
                 });
@@ -1158,20 +1230,17 @@ public sealed class ArchiveService : IArchiveService
                 }));
     }
 
-    private string CreateObjectKey(
-        ArchiveFileRequest request,
+    private static string CreateObjectKey(
+        Tenant tenant,
+        string fileTypeValue,
         DateTimeOffset timestamp)
     {
         string prefix =
-            _options.ObjectKeyPrefix.Trim('/');
+            tenant.ObjectKeyPrefix.Trim('/');
 
         string fileType =
             SanitizePathSegment(
-                request.FileType.ToLowerInvariant());
-
-        string tenant =
-            SanitizePathSegment(
-                request.Tenant.ToLowerInvariant());
+                fileTypeValue.ToLowerInvariant());
 
         string objectId =
             Guid.NewGuid().ToString("N");
@@ -1179,7 +1248,6 @@ public sealed class ArchiveService : IArchiveService
         return string.Join(
             '/',
             prefix,
-            tenant,
             fileType,
             timestamp.UtcDateTime.ToString("yyyy"),
             timestamp.UtcDateTime.ToString("MM"),
@@ -1357,22 +1425,11 @@ public sealed class ArchiveService : IArchiveService
             request.Partner,
             nameof(request.Partner),
             MaximumPartnerLength);
-        NormalizeRequiredValue(
-            request.Tenant,
-            nameof(request.Tenant),
-            MaximumTenantLength);
+        ValidateTenantId(request.TenantId);
         NormalizeRequiredValue(
             request.CreatedBy,
             nameof(request.CreatedBy),
             MaximumCreatedByLength);
-
-        if (request.RetentionUntil is null
-            && request.RetentionPolicyId is null)
-        {
-            throw new ArgumentException(
-                "Either RetentionUntil or RetentionPolicyId must be supplied.",
-                nameof(request));
-        }
 
         if (request.RetentionPolicyId <= 0)
         {
@@ -1437,10 +1494,6 @@ public sealed class ArchiveService : IArchiveService
                 reference.BusinessType,
                 nameof(reference.BusinessType),
                 MaximumBusinessTypeLength);
-            NormalizeRequiredValue(
-                reference.Tenant,
-                nameof(reference.Tenant),
-                MaximumTenantLength);
         }
 
         var duplicateReference = request.BusinessReferences
@@ -1448,8 +1501,7 @@ public sealed class ArchiveService : IArchiveService
             {
                 reference.BusinessReferenceTypeId,
                 ReferenceValue = reference.ReferenceValue.Trim(),
-                BusinessType = reference.BusinessType.Trim(),
-                Tenant = reference.Tenant.Trim()
+                BusinessType = reference.BusinessType.Trim()
             })
             .FirstOrDefault(group => group.Count() > 1);
 
@@ -1507,7 +1559,6 @@ public sealed class ArchiveService : IArchiveService
                 "BusinessReferenceTypeId must be greater than zero.");
         }
 
-        ValidateOptionalValue(request.Tenant, nameof(request.Tenant), MaximumTenantLength);
         ValidateOptionalValue(request.FileType, nameof(request.FileType), MaximumFileTypeLength);
         ValidateOptionalValue(request.SourceSystem, nameof(request.SourceSystem), MaximumSourceSystemLength);
         ValidateOptionalValue(request.Partner, nameof(request.Partner), MaximumPartnerLength);
@@ -1598,6 +1649,17 @@ public sealed class ArchiveService : IArchiveService
         return string.IsNullOrWhiteSpace(value)
             ? null
             : value.Trim();
+    }
+
+    private static void ValidateTenantId(long tenantId)
+    {
+        if (tenantId <= 0)
+        {
+            throw new ArgumentOutOfRangeException(
+                nameof(tenantId),
+                tenantId,
+                "TenantId must be greater than zero.");
+        }
     }
 
     private static void ValidateOptionalValue(

@@ -5,6 +5,7 @@ namespace MTSM.Cirrus.API.Contracts.Responses;
 
 public sealed record ArchiveFileResponse(
     long ArchiveObjectId,
+    long TenantId,
     string ObjectKey,
     string Sha256Hash,
     long SizeBytes,
@@ -14,7 +15,6 @@ public sealed record ArchiveBusinessReferenceResponse(
     int BusinessReferenceTypeId,
     string ReferenceValue,
     string BusinessType,
-    string Tenant,
     DateTimeOffset CreatedAt);
 
 public sealed record ArchiveEventResponse(
@@ -26,6 +26,7 @@ public sealed record ArchiveEventResponse(
 
 public sealed record ArchiveMetadataResponse(
     long ArchiveObjectId,
+    long TenantId,
     string ObjectKey,
     string BucketName,
     string FileType,
@@ -52,6 +53,7 @@ public sealed record ArchiveMetadataResponse(
 
 public sealed record ArchiveSearchItemResponse(
     long ArchiveObjectId,
+    long TenantId,
     string FileType,
     string? MimeType,
     string SourceSystem,

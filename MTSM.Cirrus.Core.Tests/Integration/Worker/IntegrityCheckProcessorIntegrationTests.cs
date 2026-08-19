@@ -252,6 +252,7 @@ public sealed class IntegrityCheckProcessorIntegrationTests(
         DateTimeOffset now = DateTimeOffset.UtcNow;
         var archiveObject = new ArchiveObject
         {
+            TenantId = 1,
             ObjectKey = $"worker-tests/{Guid.NewGuid():N}",
             BucketName = "cirrus-test",
             FileType = "worker-test",

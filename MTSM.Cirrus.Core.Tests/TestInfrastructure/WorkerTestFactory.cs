@@ -88,6 +88,7 @@ internal sealed class WorkerArchiveService : IArchiveService
         VerifyAsync { get; set; } = DefaultVerifyAsync;
 
     public async Task<ArchiveIntegrityResult> VerifyIntegrityAsync(
+        long tenantId,
         long archiveObjectId,
         string actor,
         CancellationToken cancellationToken = default)
@@ -149,27 +150,32 @@ internal sealed class WorkerArchiveService : IArchiveService
         throw new NotSupportedException();
 
     public Task<ArchiveDownloadResult> DownloadAsync(
+        long tenantId,
         long archiveObjectId,
         string actor,
         CancellationToken cancellationToken = default) =>
         throw new NotSupportedException();
 
     public Task<ArchiveMetadataResult?> GetMetadataAsync(
+        long tenantId,
         long archiveObjectId,
         CancellationToken cancellationToken = default) =>
         throw new NotSupportedException();
 
     public Task<ArchiveSearchResult> SearchAsync(
+        long tenantId,
         ArchiveSearchRequest request,
         CancellationToken cancellationToken = default) =>
         throw new NotSupportedException();
 
     public Task<ArchiveIntegrityStatusResult?> GetIntegrityStatusAsync(
+        long tenantId,
         long archiveObjectId,
         CancellationToken cancellationToken = default) =>
         throw new NotSupportedException();
 
     public Task<ArchiveDeletionRequestResult> RequestDeletionAsync(
+        long tenantId,
         long archiveObjectId,
         string actor,
         CancellationToken cancellationToken = default) =>

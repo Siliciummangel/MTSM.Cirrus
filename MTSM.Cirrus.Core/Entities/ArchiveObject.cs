@@ -6,6 +6,8 @@ public sealed class ArchiveObject
 {
     public long ArchiveObjectId { get; set; }
 
+    public long TenantId { get; set; }
+
     public required string ObjectKey { get; set; }
 
     public required string BucketName { get; set; }
@@ -56,6 +58,8 @@ public sealed class ArchiveObject
     public DateTimeOffset? IntegrityCheckLeaseUntil { get; set; }
 
     public required string CreatedBy { get; set; }
+
+    public Tenant Tenant { get; set; } = null!;
 
     public RetentionPolicy? RetentionPolicy { get; set; }
 
