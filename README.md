@@ -172,15 +172,9 @@ The MVP includes:
 The following features were intentionally deferred from the MVP. Scheduled
 integrity verification is the first feature being added for `0.2.0`:
 
-- Physical deletion of archived content
-- Processing deletion requests
-- Automatic purge execution
-- Retention enforcement
-- Automatic deletion after retention expiry
 - WORM enforcement
 - Immutable object storage enforcement
 - Object-lock management
-- Automatic retry processing for failed operations
 - Garbage collection of orphaned database or storage records
 - Additional authentication providers beyond the built-in API-key provider
 - Administrative user interface
@@ -199,10 +193,7 @@ Important limitations include:
 
 - API-key authentication is the only provider shipped for 1.0; JWT and mTLS
   integrations are extension points rather than bundled implementations.
-- Deletion requests do not result in physical deletion.
-- Retention information is stored but not actively enforced.
 - WORM-related metadata does not provide WORM guarantees.
-- The worker currently performs scheduled integrity checks only.
 - Operational deployment manifests are not yet included.
 - Backward compatibility is not guaranteed before version `1.0.0`.
 - The API and worker contracts may still change before `0.2.0`.
@@ -296,7 +287,8 @@ The API is stateless and can be deployed with multiple replicas.
 
 ### `archive-worker`
 
-The worker performs scheduled integrity checks for active archive objects.
+The worker performs scheduled integrity checks and retention-aware physical
+deletion of archive objects.
 It recalculates the SHA-256 hash and content size after an initial delay and
 then repeats the verification at a configurable interval.
 
@@ -308,11 +300,7 @@ as the archive event actor.
 
 The worker remains reserved for additional background tasks such as:
 
-- Processing deletion requests
-- Enforcing retention rules
-- Physically purging archive content
 - Detecting inconsistent archive records
-- Retrying recoverable operations
 - Cleaning up orphaned data
 
 Integrity checks use at-least-once processing semantics. A check can therefore
@@ -350,6 +338,11 @@ Pending
    │
    ▼
 DeletionRequested
+   │
+   ├── retention expired and storage object removed
+   │
+   ▼
+ Purged
 ```
 
 Failure handling may move an object into an error state:
@@ -358,7 +351,9 @@ Failure handling may move an object into an error state:
 Pending ────────► Error
 ```
 
-Additional lifecycle states may exist in the data model as preparation for post-MVP functionality.
+After retention expires, the worker removes the storage object and moves the
+record from `DeletionRequested` to `Purged`. See the normative
+[retention and deletion lifecycle](docs/archive-lifecycle.md).
 
 ### MVP lifecycle
 
@@ -368,6 +363,8 @@ Within the MVP:
 - `Active` represents a successfully archived and available object.
 - `Error` represents an archive operation that failed.
 - `DeletionRequested` represents an object that has been logically marked for future deletion.
+- `Purged` represents retained metadata for an object whose storage content has
+  been physically removed.
 
 A deletion request does not remove:
 
@@ -376,7 +373,7 @@ A deletion request does not remove:
 - The event history
 - The business references
 
-Physical deletion is not implemented in the MVP.
+Database metadata and event history remain after physical deletion.
 
 ---
 
@@ -903,7 +900,8 @@ The configured S3 credentials need permission to:
 - Download objects
 - Read object metadata
 
-Physical object deletion is not required by the MVP.
+Physical object deletion is performed asynchronously by the worker after the
+retention date. It is not performed by the upload or API process.
 
 ---
 
@@ -994,11 +992,8 @@ The worker schedules the first integrity check 24 hours after archival by
 default and repeats it every 180 days. Start the migration runtime before using
 the `0.2.0` worker so the scheduling and lease columns exist.
 
-The worker currently does not:
-
-- Process deletion requests
-- Delete files
-- Enforce retention
+The same worker also processes retention-aware purge batches. Apply the current
+database migrations before enabling the `Purge` configuration section.
 
 ---
 
@@ -1528,14 +1523,13 @@ Successful status:
 
 The endpoint records a logical deletion request.
 
-It does **not**:
+It does **not** immediately:
 
-- Delete the file from object storage
 - Delete archive metadata
 - Delete business references
 - Delete event history
-- Schedule a currently active purge process
-- Guarantee future physical deletion
+
+The worker deletes the storage object asynchronously after retention expiry.
 
 The archive status is changed to:
 
@@ -1558,7 +1552,8 @@ Example:
 }
 ```
 
-A future post-MVP worker implementation may process deletion requests. No such processing is part of the current MVP.
+The worker processes the request after retention expires. See
+[Archive retention and deletion lifecycle](docs/archive-lifecycle.md).
 
 ---
 
@@ -1629,22 +1624,17 @@ Example:
 retentionUntil = 2036-07-27
 ```
 
-Important:
-
-- Retention metadata is stored.
-- Retention expiry is not automatically evaluated.
-- Expired archive objects are not automatically deleted.
-- Retention rules are not enforced by the MVP.
-- Cirrus does not currently prevent deletion requests before retention expiry unless explicitly implemented in the service logic.
-- The calling application remains responsible for validating regulatory requirements.
-
-Retention enforcement is planned as post-MVP worker functionality.
+Deletion requests are allowed during retention, but physical deletion is
+blocked through the complete `retentionUntil` UTC date. Policies with
+`DeleteAfterExpiry` actively request deletion after expiry. Full rules and
+limitations are documented in
+[Archive retention and deletion lifecycle](docs/archive-lifecycle.md).
 
 ---
 
 ## Deletion behavior
 
-Deletion in the MVP is intentionally limited to a logical deletion request.
+Deletion is asynchronous and separates the API request from physical purge.
 
 ### What happens
 
@@ -1657,16 +1647,13 @@ When a valid deletion request is accepted:
 5. A corresponding archive event is recorded.
 6. The updated state is returned with `202 Accepted`.
 
-### What does not happen
+### What remains after purge
 
-The MVP does not:
+Cirrus does not:
 
-- Remove the S3 object
 - Remove the PostgreSQL record
 - Remove business references
 - Remove archive events
-- Verify retention expiry
-- Execute a purge
 - Guarantee that deletion will happen at a particular time
 
 ### Why logical deletion is separated from physical deletion
@@ -1680,9 +1667,9 @@ Separating the request from physical deletion enables future implementations to:
 - Avoid data loss during partial failures
 - Coordinate database and object-storage changes
 - Run deletion asynchronously
-- Require additional approval where needed
 
-The physical purge lifecycle is deliberately deferred until after the MVP.
+The exact processing and recovery contract is defined in
+[Archive retention and deletion lifecycle](docs/archive-lifecycle.md).
 
 ---
 
@@ -2231,15 +2218,16 @@ API consumers should use the archive object ID rather than depending on internal
 
 ### Deletion request
 
-A **deletion request** is the logical marking of an archive object for possible future physical deletion.
+A **deletion request** is the logical marking of an archive object for
+asynchronous physical deletion after retention expiry.
 
 It does not mean that content has already been deleted.
 
 ### Purge
 
-A **purge** is the future physical removal of archived content and the corresponding lifecycle handling.
-
-Purge is not part of the MVP.
+A **purge** is the physical removal of archived content followed by an audited
+`Purged` metadata transition. See
+[Archive retention and deletion lifecycle](docs/archive-lifecycle.md).
 
 ---
 

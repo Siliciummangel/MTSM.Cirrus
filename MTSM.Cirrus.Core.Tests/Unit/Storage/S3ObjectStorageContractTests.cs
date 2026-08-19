@@ -39,6 +39,8 @@ public sealed class S3ObjectStorageContractTests
 
         await Assert.ThrowsAsync<ObjectDisposedException>(() =>
             storage.ExistsAsync("bucket", "object"));
+        await Assert.ThrowsAsync<ObjectDisposedException>(() =>
+            storage.DeleteAsync("bucket", "object"));
     }
 
     private static S3ObjectStorage CreateStorage()

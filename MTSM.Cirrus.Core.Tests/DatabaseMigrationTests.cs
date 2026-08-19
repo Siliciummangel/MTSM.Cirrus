@@ -120,6 +120,8 @@ public sealed class DatabaseMigrationTests(PostgresFixture fixture)
         Assert.Null(archiveObject.NextIntegrityCheckAt);
         Assert.Null(archiveObject.IntegrityCheckLeaseOwner);
         Assert.Null(archiveObject.IntegrityCheckLeaseUntil);
+        Assert.Null(archiveObject.PurgeLeaseOwner);
+        Assert.Null(archiveObject.PurgeLeaseUntil);
         Assert.Empty(await dbContext.Database.GetPendingMigrationsAsync());
     }
 

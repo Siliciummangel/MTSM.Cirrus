@@ -28,4 +28,15 @@ public interface IObjectStorage
         string bucketName,
         string objectKey,
         CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Permanently removes the addressed object version. A definite storage
+    /// not-found response is returned as an idempotent outcome; all other
+    /// failures are raised as exceptions.
+    /// </summary>
+    Task<ObjectStorageDeleteOutcome> DeleteAsync(
+        string bucketName,
+        string objectKey,
+        string? versionId = null,
+        CancellationToken cancellationToken = default);
 }

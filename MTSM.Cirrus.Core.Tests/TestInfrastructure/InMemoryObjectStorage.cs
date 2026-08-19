@@ -12,6 +12,12 @@ internal sealed class InMemoryObjectStorage : IObjectStorage
 
     public Exception? ReadException { get; set; }
 
+    public Exception? DeleteException { get; set; }
+
+    public Func<CancellationToken, Task>? BeforeDeleteCompletesAsync { get; set; }
+
+    public int DeleteCallCount { get; private set; }
+
     public Func<CancellationToken, Task>? BeforeWriteCompletesAsync { get; set; }
 
     public TrackingMemoryStream? LastReadStream { get; private set; }
@@ -69,6 +75,30 @@ internal sealed class InMemoryObjectStorage : IObjectStorage
     {
         cancellationToken.ThrowIfCancellationRequested();
         return Task.FromResult(_objects.ContainsKey((bucketName, objectKey)));
+    }
+
+    public async Task<ObjectStorageDeleteOutcome> DeleteAsync(
+        string bucketName,
+        string objectKey,
+        string? versionId = null,
+        CancellationToken cancellationToken = default)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+        DeleteCallCount++;
+
+        if (DeleteException is not null)
+        {
+            throw DeleteException;
+        }
+
+        if (BeforeDeleteCompletesAsync is not null)
+        {
+            await BeforeDeleteCompletesAsync(cancellationToken);
+        }
+
+        return _objects.TryRemove((bucketName, objectKey), out _)
+            ? ObjectStorageDeleteOutcome.Deleted
+            : ObjectStorageDeleteOutcome.NotFound;
     }
 
     public void Replace(string bucketName, string objectKey, byte[] content)

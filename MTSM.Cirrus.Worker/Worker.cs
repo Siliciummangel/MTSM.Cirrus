@@ -3,11 +3,14 @@ using Microsoft.Extensions.Options;
 namespace MTSM.Cirrus.Worker;
 
 public sealed class Worker(
-    IntegrityCheckProcessor processor,
-    IOptions<IntegrityCheckOptions> options,
+    IntegrityCheckProcessor integrityProcessor,
+    PurgeProcessor purgeProcessor,
+    IOptions<IntegrityCheckOptions> integrityOptions,
+    IOptions<PurgeOptions> purgeOptions,
     ILogger<Worker> logger) : BackgroundService
 {
-    private readonly IntegrityCheckOptions _options = options.Value;
+    private readonly IntegrityCheckOptions _integrityOptions = integrityOptions.Value;
+    private readonly PurgeOptions _purgeOptions = purgeOptions.Value;
 
     protected override async Task ExecuteAsync(CancellationToken cancellationToken)
     {
@@ -15,11 +18,13 @@ public sealed class Worker(
 
         logger.LogInformation(
             "Archive worker {WorkerInstanceId} started. " +
-            "Integrity checks enabled: {Enabled}.",
+            "Integrity checks enabled: {IntegrityEnabled}; " +
+            "purge enabled: {PurgeEnabled}.",
             workerInstanceId,
-            _options.Enabled);
+            _integrityOptions.Enabled,
+            _purgeOptions.Enabled);
 
-        if (!_options.Enabled)
+        if (!_integrityOptions.Enabled && !_purgeOptions.Enabled)
         {
             await WaitForShutdownAsync(cancellationToken);
 
@@ -34,15 +39,25 @@ public sealed class Worker(
         {
             while (!cancellationToken.IsCancellationRequested)
             {
-                int claimed = await processor.ProcessBatchAsync(
-                    workerInstanceId,
-                    cancellationToken);
+                int integrityClaimed = _integrityOptions.Enabled
+                    ? await integrityProcessor.ProcessBatchAsync(workerInstanceId, cancellationToken)
+                    : 0;
+                int purgeClaimed = _purgeOptions.Enabled
+                    ? await purgeProcessor.ProcessBatchAsync(workerInstanceId, cancellationToken)
+                    : 0;
 
-                if (claimed < _options.BatchSize)
+                if (integrityClaimed < _integrityOptions.BatchSize
+                    && purgeClaimed < _purgeOptions.BatchSize)
                 {
                     await Task.Delay(
                         TimeSpan.FromSeconds(
-                            _options.PollingIntervalSeconds),
+                            Math.Min(
+                                _integrityOptions.Enabled
+                                    ? _integrityOptions.PollingIntervalSeconds
+                                    : int.MaxValue,
+                                _purgeOptions.Enabled
+                                    ? _purgeOptions.PollingIntervalSeconds
+                                    : int.MaxValue)),
                         cancellationToken);
                 }
             }
@@ -61,7 +76,7 @@ public sealed class Worker(
     private string ResolveWorkerInstanceId()
     {
         string configuredId =
-            _options.WorkerInstanceId?.Trim()
+            _integrityOptions.WorkerInstanceId?.Trim()
             ?? string.Empty;
 
         string baseId = string.IsNullOrWhiteSpace(configuredId)

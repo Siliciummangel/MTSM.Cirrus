@@ -43,6 +43,10 @@ public sealed class ArchiveObject
 
     public DateTimeOffset? PurgedAt { get; set; }
 
+    public string? PurgeLeaseOwner { get; set; }
+
+    public DateTimeOffset? PurgeLeaseUntil { get; set; }
+
     public string? StorageVersionId { get; set; }
 
     public string? EncryptionKeyId { get; set; }

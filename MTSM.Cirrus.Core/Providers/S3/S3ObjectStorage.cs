@@ -348,6 +348,64 @@ public sealed class S3ObjectStorage : IObjectStorage, IDisposable
         }
     }
 
+    public async Task<ObjectStorageDeleteOutcome> DeleteAsync(
+        string bucketName,
+        string objectKey,
+        string? versionId = null,
+        CancellationToken cancellationToken = default)
+    {
+        ThrowIfDisposed();
+        ValidateLocation(bucketName, objectKey);
+
+        string? normalizedVersionId = string.IsNullOrWhiteSpace(versionId)
+            ? null
+            : versionId.Trim();
+
+        try
+        {
+            await _s3Client.GetObjectMetadataAsync(
+                new GetObjectMetadataRequest
+                {
+                    BucketName = bucketName,
+                    Key = objectKey,
+                    VersionId = normalizedVersionId
+                },
+                cancellationToken);
+
+            await _s3Client.DeleteObjectAsync(
+                new DeleteObjectRequest
+                {
+                    BucketName = bucketName,
+                    Key = objectKey,
+                    VersionId = normalizedVersionId
+                },
+                cancellationToken);
+
+            _logger.LogInformation(
+                "Deleted an object from S3 bucket {BucketName}.",
+                bucketName);
+
+            return ObjectStorageDeleteOutcome.Deleted;
+        }
+        catch (AmazonS3Exception exception)
+            when (IsNotFound(exception))
+        {
+            return ObjectStorageDeleteOutcome.NotFound;
+        }
+        catch (AmazonS3Exception exception)
+            when (!cancellationToken.IsCancellationRequested)
+        {
+            LogS3Failure("delete", exception);
+            throw CreateStorageException("delete", exception);
+        }
+        catch (Exception exception)
+            when (!cancellationToken.IsCancellationRequested)
+        {
+            LogUnexpectedStorageFailure("delete", exception);
+            throw CreateStorageException("delete", exception);
+        }
+    }
+
     private static ObjectStorageException CreateStorageException(
         string operation,
         Exception exception)

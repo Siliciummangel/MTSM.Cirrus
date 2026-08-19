@@ -69,6 +69,27 @@ public sealed class S3ObjectStorageIntegrationTests(S3Fixture fixture)
                 missingObjectKey));
     }
 
+    [S3Fact]
+    public async Task DeleteAsync_DeletesExistingObjectAndTreatsMissingAsIdempotentOutcome()
+    {
+        using S3ObjectStorage storage = fixture.CreateStorage();
+        string objectKey = fixture.CreateObjectKey("delete.bin");
+        await using var content = new MemoryStream("content"u8.ToArray());
+        ObjectStorageWriteResult write = await storage.WriteAsync(
+            fixture.BucketName,
+            objectKey,
+            content,
+            null);
+
+        Assert.Equal(
+            ObjectStorageDeleteOutcome.Deleted,
+            await storage.DeleteAsync(fixture.BucketName, objectKey, write.VersionId));
+        Assert.False(await storage.ExistsAsync(fixture.BucketName, objectKey));
+        Assert.Equal(
+            ObjectStorageDeleteOutcome.NotFound,
+            await storage.DeleteAsync(fixture.BucketName, objectKey, write.VersionId));
+    }
+
     private static byte[] CreatePayload()
     {
         byte[] payload = new byte[128 * 1024];

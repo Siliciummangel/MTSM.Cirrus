@@ -7,6 +7,12 @@ public sealed record ObjectStorageWriteResult(
     string? VersionId,
     string? ETag);
 
+public enum ObjectStorageDeleteOutcome
+{
+    Deleted,
+    NotFound
+}
+
 public sealed record ArchiveBusinessReferenceInput(
     int BusinessReferenceTypeId,
     string ReferenceValue,

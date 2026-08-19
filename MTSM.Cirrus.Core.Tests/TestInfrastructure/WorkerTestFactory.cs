@@ -181,3 +181,62 @@ internal sealed class WorkerArchiveService : IArchiveService
         CancellationToken cancellationToken = default) =>
         throw new NotSupportedException();
 }
+
+internal sealed class PurgeWorkerTestContext : IAsyncDisposable
+{
+    private readonly ServiceProvider _serviceProvider;
+
+    private PurgeWorkerTestContext(
+        ServiceProvider serviceProvider,
+        PurgeProcessor processor,
+        InMemoryObjectStorage storage,
+        TestTimeProvider clock)
+    {
+        _serviceProvider = serviceProvider;
+        Processor = processor;
+        Storage = storage;
+        Clock = clock;
+    }
+
+    public PurgeProcessor Processor { get; }
+    public InMemoryObjectStorage Storage { get; }
+    public TestTimeProvider Clock { get; }
+
+    public static PurgeWorkerTestContext Create(
+        string connectionString,
+        DateTimeOffset now,
+        PurgeOptions? options = null,
+        InMemoryObjectStorage? storage = null)
+    {
+        storage ??= new InMemoryObjectStorage();
+        var clock = new TestTimeProvider(now);
+        var services = new ServiceCollection();
+        services.AddScoped(_ => CoreTestFactory.CreateDbContext(connectionString));
+        services.AddSingleton<IObjectStorage>(storage);
+        ServiceProvider provider = services.BuildServiceProvider();
+        PurgeOptions configured = options ?? new PurgeOptions
+        {
+            PollingIntervalSeconds = 1,
+            BatchSize = 10,
+            MaxConcurrentDeletes = 2,
+            LeaseDurationMinutes = 3,
+            InitialRetryDelayMinutes = 5,
+            MaximumRetryDelayMinutes = 60
+        };
+        var processor = new PurgeProcessor(
+            provider.GetRequiredService<IServiceScopeFactory>(),
+            Options.Create(configured),
+            clock,
+            NullLogger<PurgeProcessor>.Instance);
+        return new PurgeWorkerTestContext(provider, processor, storage, clock);
+    }
+
+    public ValueTask DisposeAsync() => _serviceProvider.DisposeAsync();
+}
+
+internal sealed class TestTimeProvider(DateTimeOffset utcNow) : TimeProvider
+{
+    private DateTimeOffset _utcNow = utcNow;
+    public override DateTimeOffset GetUtcNow() => _utcNow;
+    public void Advance(TimeSpan duration) => _utcNow = _utcNow.Add(duration);
+}

@@ -48,3 +48,10 @@ for correctness or input validation.
 - Logical deletion is serialized with a database row lock. Repeated requests
   for `DeletionRequested` or `Purged` objects do not create another event and
   report `StateChanged = false`.
+- A deletion request may be recorded during retention, but the worker cannot
+  physically delete the object through the complete `RetentionUntil` UTC date.
+- Physical deletion removes storage first and records `Purged` afterwards.
+  Definite storage `Not Found` is an idempotent success; other storage failures
+  remain retryable and audited.
+- Worker leases prevent cooperative duplicate processing and expire after a
+  worker interruption so another instance can resume.

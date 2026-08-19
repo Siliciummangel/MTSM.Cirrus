@@ -105,6 +105,12 @@ public sealed class ArchiveObjectConfiguration
         builder.Property(x => x.PurgedAt)
             .HasColumnType("timestamp with time zone");
 
+        builder.Property(x => x.PurgeLeaseOwner)
+            .HasMaxLength(255);
+
+        builder.Property(x => x.PurgeLeaseUntil)
+            .HasColumnType("timestamp with time zone");
+
         builder.Property(x => x.StorageVersionId)
             .HasMaxLength(1024);
 
@@ -163,7 +169,8 @@ public sealed class ArchiveObjectConfiguration
         builder.HasIndex(x => new
         {
             x.ArchiveStatus,
-            x.DeletionRequestedAt
+            x.RetentionUntil,
+            x.PurgeLeaseUntil
         });
 
         builder.HasIndex(x => new
