@@ -18,6 +18,23 @@ namespace MTSM.Cirrus.Core.Tests;
 [Collection(PostgresCollection.Name)]
 public sealed class ApiKeyAuthenticationIntegrationTests(PostgresFixture fixture) : IAsyncLifetime
 {
+    [Fact]
+    public void RealApiKeyFactory_UsesProvidedDatabaseConnectionString()
+    {
+        const string connectionString =
+            "Host=127.0.0.1;Port=5432;Database=configuration_probe_test;" +
+            "Username=probe;Password=probe";
+
+        using var factory = new RealApiKeyFactory(connectionString);
+        using IServiceScope scope = factory.Services.CreateScope();
+        CirrusDbContext db = scope.ServiceProvider.GetRequiredService<CirrusDbContext>();
+
+        Assert.Contains(
+            "Database=configuration_probe_test",
+            db.Database.GetConnectionString(),
+            StringComparison.OrdinalIgnoreCase);
+    }
+
     [PostgresFact]
     public async Task ApiKeyProvider_AuthenticatesHashesRevokesAndEnforcesTenant()
     {
@@ -86,8 +103,9 @@ internal sealed class RealApiKeyFactory(string connectionString) : WebApplicatio
     protected override void ConfigureWebHost(IWebHostBuilder builder)
     {
         builder.UseEnvironment("Testing");
-        builder.ConfigureAppConfiguration((_, configuration) => configuration.AddInMemoryCollection(
-            new Dictionary<string, string?> { ["ConnectionStrings:ArchiveDatabase"] = connectionString }));
+        builder.UseSetting(
+            "ConnectionStrings:ArchiveDatabase",
+            connectionString);
         builder.ConfigureTestServices(services =>
         {
             services.RemoveAll<IArchiveService>();
