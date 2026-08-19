@@ -31,6 +31,11 @@ public sealed class CirrusDbContext : DbContext
     public DbSet<ArchiveErrorQueueItem> ArchiveErrorQueue =>
         Set<ArchiveErrorQueueItem>();
 
+    public DbSet<MachineIdentity> MachineIdentities => Set<MachineIdentity>();
+    public DbSet<MachineIdentityPermission> MachineIdentityPermissions => Set<MachineIdentityPermission>();
+    public DbSet<ApiKeyCredential> ApiKeyCredentials => Set<ApiKeyCredential>();
+    public DbSet<SecurityAuditEvent> SecurityAuditEvents => Set<SecurityAuditEvent>();
+
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
         base.OnModelCreating(modelBuilder);

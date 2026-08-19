@@ -26,11 +26,6 @@ public sealed class ArchiveUploadRequest
     [FromForm(Name = "receivedAt")]
     public DateTimeOffset? ReceivedAt { get; init; }
 
-    [Required]
-    [StringLength(200)]
-    [FromForm(Name = "createdBy")]
-    public string CreatedBy { get; init; } = string.Empty;
-
     [FromForm(Name = "retentionPolicyId")]
     public int? RetentionPolicyId { get; init; }
 

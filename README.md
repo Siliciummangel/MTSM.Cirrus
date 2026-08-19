@@ -2,6 +2,11 @@
 
 MTSM.Cirrus is a lightweight technical archiving service for applications.
 
+> **Security:** Archive endpoints require a tenant-bound machine identity and
+> explicit permissions. Cirrus 1.0 includes API-key authentication and keeps the
+> authentication provider replaceable. See [docs/security.md](docs/security.md)
+> for provisioning, operation and extension guidance.
+
 It stores file content in an S3-compatible object storage system and persists searchable metadata in PostgreSQL. Cirrus exposes a REST API for archiving files, retrieving metadata, downloading archived content, and requesting logical deletion.
 
 Cirrus is designed as an infrastructure component for application-generated files and raw business data. It is intentionally not a document management system.
@@ -177,7 +182,7 @@ integrity verification is the first feature being added for `0.2.0`:
 - Object-lock management
 - Automatic retry processing for failed operations
 - Garbage collection of orphaned database or storage records
-- Authentication and authorization
+- Additional authentication providers beyond the built-in API-key provider
 - Administrative user interface
 - Storage replication management
 - Backup orchestration
@@ -192,8 +197,8 @@ Cirrus is currently an early pre-release project.
 
 Important limitations include:
 
-- No authentication or authorization is currently enforced by the API.
-- Actor information is supplied by the calling application.
+- API-key authentication is the only provider shipped for 1.0; JWT and mTLS
+  integrations are extension points rather than bundled implementations.
 - Deletion requests do not result in physical deletion.
 - Retention information is stored but not actively enforced.
 - WORM-related metadata does not provide WORM guarantees.
@@ -411,6 +416,9 @@ MTSM.Cirrus/
 │   ├── Program.cs
 │   └── appsettings.json
 │
+├── MTSM.Cirrus.Admin/
+│   └── Program.cs
+│
 ├── MTSM.Cirrus.Core/
 │   ├── Abstractions/
 │   ├── Config/
@@ -433,6 +441,9 @@ MTSM.Cirrus/
 │
 ├── MTSM.Cirrus.Core.Tests/
 │
+├── docs/
+│   └── security.md
+│
 ├── LICENSE.txt
 ├── MTSM.Cirrus.slnx
 └── README.md
@@ -443,6 +454,7 @@ MTSM.Cirrus/
 | Project | Responsibility |
 |---|---|
 | `MTSM.Cirrus.API` | REST API, HTTP contracts, middleware, OpenAPI and health endpoints |
+| `MTSM.Cirrus.Admin` | Local machine-identity and API-key lifecycle CLI |
 | `MTSM.Cirrus.Core` | Archive domain logic, persistence, entities and object-storage integration |
 | `MTSM.Cirrus.Migration` | Database migration execution |
 | `MTSM.Cirrus.Worker` | Scheduled integrity verification and future background processing |
@@ -1019,6 +1031,7 @@ The examples below use:
 
 ```bash
 BASE_URL="http://localhost:5190"
+CIRRUS_API_KEY="cirrus_<key-id>.<secret>"
 ```
 
 ---
@@ -1041,13 +1054,13 @@ Example:
 
 ```bash
 curl --request POST \
+  --header "Authorization: ApiKey ${CIRRUS_API_KEY}" \
   "${BASE_URL}/api/tenants/1/archive" \
   --form "file=@./example.pdf;type=application/pdf" \
   --form "fileType=invoice" \
   --form "sourceSystem=example-application" \
   --form "partner=example-partner" \
   --form "receivedAt=2026-07-27T18:30:00Z" \
-  --form "createdBy=max@example.org" \
   --form "retentionUntil=2036-07-27"
 ```
 
@@ -1059,7 +1072,6 @@ Required fields:
 | `fileType` | String | Technical or business file type |
 | `sourceSystem` | String | Application that submitted the file |
 | `tenantId` | Route | Positive 64-bit identity of the tenant owning the archive object |
-| `createdBy` | String | Actor or system that initiated archival |
 
 Optional fields:
 
@@ -1123,6 +1135,7 @@ Example:
 
 ```bash
 curl \
+  --header "Authorization: ApiKey ${CIRRUS_API_KEY}" \
   "${BASE_URL}/api/tenants/1/archive/16/metadata"
 ```
 
@@ -1151,7 +1164,7 @@ Example response:
   "storageVersionId": null,
   "encryptionKeyId": null,
   "isWormProtected": false,
-  "createdBy": "max@example.org",
+  "createdBy": "apikey:machine:42",
   "businessReferences": [],
   "events": []
 }
@@ -1185,6 +1198,7 @@ Example:
 
 ```bash
 curl \
+  --header "Authorization: ApiKey ${CIRRUS_API_KEY}" \
   --head \
   "${BASE_URL}/api/tenants/1/archive/16"
 ```
@@ -1224,13 +1238,13 @@ Endpoint:
 GET /api/tenants/{tenantId}/archive/{archiveObjectId}
 ```
 
-The caller must provide the `X-Actor` header.
+The caller must provide the permission documented for this operation.
 
 Example:
 
 ```bash
 curl \
-  --header "X-Actor: max@example.org" \
+  --header "Authorization: ApiKey ${CIRRUS_API_KEY}" \
   --output downloaded-example.pdf \
   "${BASE_URL}/api/tenants/1/archive/16"
 ```
@@ -1257,7 +1271,7 @@ Range processing is enabled. Clients may request partial content where supported
 Example actor header:
 
 ```http
-X-Actor: example-application
+Authorization: ApiKey ${CIRRUS_API_KEY}
 ```
 
 The actor is recorded in the archive event history.
@@ -1304,6 +1318,7 @@ Example:
 
 ```bash
 curl --get \
+  --header "Authorization: ApiKey ${CIRRUS_API_KEY}" \
   "${BASE_URL}/api/tenants/1/archive/search" \
   --data-urlencode "sourceSystem=example-application" \
   --data-urlencode "archiveStatus=Active" \
@@ -1364,14 +1379,14 @@ Endpoint:
 POST /api/tenants/{tenantId}/archive/{archiveObjectId}/verify-integrity
 ```
 
-The caller must provide the `X-Actor` header.
+The caller must provide the permission documented for this operation.
 
 Example:
 
 ```bash
 curl \
   --request POST \
-  --header "X-Actor: max@example.org" \
+  --header "Authorization: ApiKey ${CIRRUS_API_KEY}" \
   "${BASE_URL}/api/tenants/1/archive/16/verify-integrity"
 ```
 
@@ -1431,7 +1446,8 @@ GET /api/tenants/{tenantId}/archive/{archiveObjectId}/integrity-status
 Example:
 
 ```bash
-curl "${BASE_URL}/api/tenants/1/archive/16/integrity-status"
+curl --header "Authorization: ApiKey ${CIRRUS_API_KEY}" \
+  "${BASE_URL}/api/tenants/1/archive/16/integrity-status"
 ```
 
 Example response:
@@ -1480,14 +1496,14 @@ Endpoint:
 DELETE /api/tenants/{tenantId}/archive/{archiveObjectId}
 ```
 
-The caller must provide the `X-Actor` header.
+The caller must provide the permission documented for this operation.
 
 Example:
 
 ```bash
 curl \
   --request DELETE \
-  --header "X-Actor: max@example.org" \
+  --header "Authorization: ApiKey ${CIRRUS_API_KEY}" \
   "${BASE_URL}/api/tenants/1/archive/16"
 ```
 
@@ -1498,7 +1514,7 @@ Example response:
   "archiveObjectId": 16,
   "archiveStatus": "DeletionRequested",
   "deletionRequestedAt": "2026-07-27T19:00:00.0000000+00:00",
-  "deletionRequestedBy": "max@example.org",
+  "deletionRequestedBy": "apikey:machine:42",
   "purgedAt": null,
   "stateChanged": true
 }
@@ -1536,7 +1552,7 @@ Example:
   "archiveObjectId": 16,
   "archiveStatus": "DeletionRequested",
   "deletionRequestedAt": "2026-07-27T19:00:00.0000000+00:00",
-  "deletionRequestedBy": "max@example.org",
+  "deletionRequestedBy": "apikey:machine:42",
   "purgedAt": null,
   "stateChanged": false
 }
@@ -1548,44 +1564,10 @@ A future post-MVP worker implementation may process deletion requests. No such p
 
 ## Actor tracking
 
-Some operations require an actor to be supplied through the HTTP header:
-
-```http
-X-Actor: actor-name
-```
-
-The header is currently required for:
-
-- File download
-- Manual integrity verification
-- Logical deletion requests
-
-The actor can represent:
-
-- A user
-- A service account
-- A source application
-- A scheduled process
-
-Examples:
-
-```http
-X-Actor: max@example.org
-```
-
-```http
-X-Actor: invoice-service
-```
-
-```http
-X-Actor: application/backend-job
-```
-
-Cirrus currently trusts the value supplied by the caller.
-
-The `X-Actor` header is **not an authentication mechanism**.
-
-Once authentication is introduced, actor information should be derived or validated against the authenticated identity.
+Cirrus derives the audit actor exclusively from the authenticated machine
+identity. API-key actors use the stable form `apikey:machine:{id}` and remain
+unchanged when a credential is rotated. Caller-provided `X-Actor` values and
+`createdBy` form fields are not trusted. See [docs/security.md](docs/security.md).
 
 ---
 
@@ -1743,6 +1725,7 @@ Example:
 
 ```bash
 curl \
+  --header "Authorization: ApiKey ${CIRRUS_API_KEY}" \
   "${BASE_URL}/health/ready"
 ```
 
@@ -1862,14 +1845,12 @@ Never log:
 
 ## Security considerations
 
-The MVP does not yet provide complete production security controls.
+Cirrus protects archive endpoints with tenant-bound API keys and explicit
+permissions. Production deployments must follow the provisioning, proxy,
+logging and rotation guidance in [docs/security.md](docs/security.md).
 
-Before exposing Cirrus outside a trusted network, consider:
+Operational controls include:
 
-- Adding authentication
-- Adding authorization
-- Validating tenant access
-- Deriving actors from authenticated identities
 - Enforcing TLS
 - Restricting database network access
 - Restricting object-storage network access
@@ -1906,10 +1887,9 @@ without weakening the tenant boundary.
 The background worker retains system-wide visibility but carries the persisted tenant ID
 into each integrity operation and skips disabled tenants.
 
-Authentication is still required before this structural isolation becomes a production
-security boundary: until then, callers can choose any tenant ID in the route. Phase 2
-must derive the permitted tenant from a trusted authenticated identity and compare it
-with the route tenant.
+The API derives the permitted tenant and actor from an authenticated machine identity.
+The tenant in the route is retained for explicit resource addressing and must match the
+authenticated tenant before controller code or the archive service executes.
 
 ### Integrity
 

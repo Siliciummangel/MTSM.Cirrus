@@ -23,6 +23,7 @@
   </ItemGroup>
 
   <ItemGroup>
+    <ProjectReference Include="..\MTSM.Cirrus.Admin\MTSM.Cirrus.Admin.csproj" />
     <ProjectReference Include="..\MTSM.Cirrus.Core\MTSM.Cirrus.Core.csproj" />
     <ProjectReference Include="..\MTSM.Cirrus.API\MTSM.Cirrus.API.csproj" />
     <ProjectReference Include="..\MTSM.Cirrus.Migration\MTSM.Cirrus.Migration.csproj" />

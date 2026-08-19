@@ -2,25 +2,29 @@
 using MTSM.Cirrus.API.Contracts.Requests;
 using MTSM.Cirrus.API.Contracts.Responses;
 using MTSM.Cirrus.API.Mapping;
+using MTSM.Cirrus.API.Security;
 using MTSM.Cirrus.Core.Abstractions;
 using MTSM.Cirrus.Core.Models;
+using Microsoft.AspNetCore.Authorization;
 
 namespace MTSM.Cirrus.API.Controllers;
 
 [ApiController]
+[Authorize]
 [Route("api/tenants/{tenantId:long}/archive")]
 public sealed class ArchiveController : ControllerBase
 {
-    private const string ActorHeaderName = "X-Actor";
-
     private readonly IArchiveService _archiveService;
+    private readonly ICirrusIdentityAccessor _identityAccessor;
     private readonly ILogger<ArchiveController> _logger;
 
     public ArchiveController(
         IArchiveService archiveService,
+        ICirrusIdentityAccessor identityAccessor,
         ILogger<ArchiveController> logger)
     {
         _archiveService = archiveService;
+        _identityAccessor = identityAccessor;
         _logger = logger;
     }
 
@@ -28,6 +32,7 @@ public sealed class ArchiveController : ControllerBase
     /// Archives a file and its metadata.
     /// </summary>
     [HttpPost]
+    [Authorize(Policy = CirrusAuthorizationPolicies.Write)]
     [Consumes("multipart/form-data")]
     [ProducesResponseType<ArchiveFileResponse>(
         StatusCodes.Status201Created)]
@@ -95,8 +100,7 @@ public sealed class ArchiveController : ControllerBase
                 ReceivedAt =
                     receivedAt,
 
-                CreatedBy =
-                    request.CreatedBy.Trim(),
+                CreatedBy = _identityAccessor.GetRequiredIdentity().Actor,
 
                 RetentionPolicyId =
                     request.RetentionPolicyId,
@@ -137,6 +141,7 @@ public sealed class ArchiveController : ControllerBase
     /// Downloads an archived file.
     /// </summary>
     [HttpGet("{archiveObjectId:long}")]
+    [Authorize(Policy = CirrusAuthorizationPolicies.Read)]
     [ProducesResponseType(StatusCodes.Status200OK)]
     [ProducesResponseType<ProblemDetails>(
         StatusCodes.Status400BadRequest)]
@@ -149,23 +154,13 @@ public sealed class ArchiveController : ControllerBase
     public async Task<IActionResult> DownloadAsync(
         [FromRoute] long tenantId,
         [FromRoute] long archiveObjectId,
-        [FromHeader(Name = ActorHeaderName)] string? actor,
         CancellationToken cancellationToken)
     {
-        if (string.IsNullOrWhiteSpace(actor))
-        {
-            ModelState.AddModelError(
-                ActorHeaderName,
-                $"The HTTP header '{ActorHeaderName}' is required.");
-
-            return ValidationProblem(ModelState);
-        }
-
         ArchiveDownloadResult result =
             await _archiveService.DownloadAsync(
                 tenantId,
                 archiveObjectId,
-                actor.Trim(),
+                _identityAccessor.GetRequiredIdentity().Actor,
                 cancellationToken);
 
         string contentType =
@@ -200,6 +195,7 @@ public sealed class ArchiveController : ControllerBase
     /// asynchronously by a background worker.
     /// </remarks>
     [HttpDelete("{archiveObjectId:long}")]
+    [Authorize(Policy = CirrusAuthorizationPolicies.Delete)]
     [ProducesResponseType<ArchiveDeletionRequestResponse>(
         StatusCodes.Status202Accepted)]
     [ProducesResponseType<ProblemDetails>(
@@ -214,23 +210,13 @@ public sealed class ArchiveController : ControllerBase
         RequestDeletionAsync(
             [FromRoute] long tenantId,
             [FromRoute] long archiveObjectId,
-            [FromHeader(Name = ActorHeaderName)] string? actor,
             CancellationToken cancellationToken)
     {
-        if (string.IsNullOrWhiteSpace(actor))
-        {
-            ModelState.AddModelError(
-                ActorHeaderName,
-                $"The HTTP header '{ActorHeaderName}' is required.");
-
-            return ValidationProblem(ModelState);
-        }
-
         ArchiveDeletionRequestResult result =
             await _archiveService.RequestDeletionAsync(
                 tenantId,
                 archiveObjectId,
-                actor.Trim(),
+                _identityAccessor.GetRequiredIdentity().Actor,
                 cancellationToken);
 
         ArchiveDeletionRequestResponse response =
@@ -251,6 +237,7 @@ public sealed class ArchiveController : ControllerBase
     /// Searches archive metadata using optional filters and pagination.
     /// </summary>
     [HttpGet("search")]
+    [Authorize(Policy = CirrusAuthorizationPolicies.Read)]
     [ProducesResponseType<ArchiveSearchResponse>(
         StatusCodes.Status200OK)]
     [ProducesResponseType<ProblemDetails>(
@@ -302,6 +289,7 @@ public sealed class ArchiveController : ControllerBase
     /// the comparison fails; inspect isValid for the result.
     /// </remarks>
     [HttpPost("{archiveObjectId:long}/verify-integrity")]
+    [Authorize(Policy = CirrusAuthorizationPolicies.Verify)]
     [ProducesResponseType<ArchiveIntegrityResponse>(
         StatusCodes.Status200OK)]
     [ProducesResponseType<ProblemDetails>(
@@ -316,23 +304,13 @@ public sealed class ArchiveController : ControllerBase
         VerifyIntegrityAsync(
             [FromRoute] long tenantId,
             [FromRoute] long archiveObjectId,
-            [FromHeader(Name = ActorHeaderName)] string? actor,
             CancellationToken cancellationToken)
     {
-        if (string.IsNullOrWhiteSpace(actor))
-        {
-            ModelState.AddModelError(
-                ActorHeaderName,
-                $"The HTTP header '{ActorHeaderName}' is required.");
-
-            return ValidationProblem(ModelState);
-        }
-
         ArchiveIntegrityResult result =
             await _archiveService.VerifyIntegrityAsync(
                 tenantId,
                 archiveObjectId,
-                actor.Trim(),
+                _identityAccessor.GetRequiredIdentity().Actor,
                 cancellationToken);
 
         return Ok(ArchiveResponseMapper.Map(result));
@@ -342,6 +320,7 @@ public sealed class ArchiveController : ControllerBase
     /// Returns scheduling and execution status for integrity checks.
     /// </summary>
     [HttpGet("{archiveObjectId:long}/integrity-status")]
+    [Authorize(Policy = CirrusAuthorizationPolicies.Read)]
     [ProducesResponseType<ArchiveIntegrityStatusResponse>(
         StatusCodes.Status200OK)]
     [ProducesResponseType<ProblemDetails>(
@@ -381,6 +360,7 @@ public sealed class ArchiveController : ControllerBase
     /// </summary>
     [HttpGet("{archiveObjectId:long}/metadata",
         Name = "GetArchiveMetadata")]
+    [Authorize(Policy = CirrusAuthorizationPolicies.Read)]
     [ProducesResponseType<ArchiveMetadataResponse>(
         StatusCodes.Status200OK)]
     [ProducesResponseType<ProblemDetails>(
@@ -430,6 +410,7 @@ public sealed class ArchiveController : ControllerBase
     /// Checks whether an archive object exists.
     /// </summary>
     [HttpHead("{archiveObjectId:long}")]
+    [Authorize(Policy = CirrusAuthorizationPolicies.Read)]
     [ProducesResponseType(StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status404NotFound)]
     public async Task<IActionResult> ExistsAsync(

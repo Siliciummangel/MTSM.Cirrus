@@ -21,8 +21,7 @@ public sealed class ArchiveApiIntegrationTests
         {
             { new ByteArrayContent("payload"u8.ToArray()), "file", "payload.txt" },
             { new StringContent("document"), "fileType" },
-            { new StringContent("source-a"), "sourceSystem" },
-            { new StringContent("api-user"), "createdBy" }
+            { new StringContent("source-a"), "sourceSystem" }
         };
 
         HttpResponseMessage response = await client.PostAsync(
@@ -46,7 +45,7 @@ public sealed class ArchiveApiIntegrationTests
         using var factory = new ApiTestFactory();
         using HttpClient client = factory.CreateClient();
         using var request = new HttpRequestMessage(HttpMethod.Get, "/api/tenants/1/archive/42");
-        request.Headers.Add("X-Actor", "  api-user  ");
+        request.Headers.Add("X-Actor", "attacker-controlled");
 
         HttpResponseMessage response = await client.SendAsync(request);
 
@@ -55,7 +54,7 @@ public sealed class ArchiveApiIntegrationTests
         Assert.Equal("text/plain", response.Content.Headers.ContentType?.MediaType);
         Assert.Equal("\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\"", response.Headers.ETag?.Tag);
         Assert.Equal("42", response.Headers.GetValues("X-Archive-Object-Id").Single());
-        Assert.Equal("api-user", factory.ArchiveService.LastActor);
+        Assert.Equal("apikey:machine:1", factory.ArchiveService.LastActor);
     }
 
     [Fact]
@@ -85,7 +84,6 @@ public sealed class ArchiveApiIntegrationTests
         using var factory = new ApiTestFactory();
         using HttpClient client = factory.CreateClient();
         using var request = new HttpRequestMessage(HttpMethod.Delete, "/api/tenants/1/archive/42");
-        request.Headers.Add("X-Actor", "api-user");
 
         HttpResponseMessage response = await client.SendAsync(request);
 
@@ -107,7 +105,6 @@ public sealed class ArchiveApiIntegrationTests
         using var request = new HttpRequestMessage(
             HttpMethod.Post,
             "/api/tenants/1/archive/42/verify-integrity");
-        request.Headers.Add("X-Actor", "api-user");
 
         HttpResponseMessage response = await client.SendAsync(request);
 
@@ -116,7 +113,7 @@ public sealed class ArchiveApiIntegrationTests
             await response.Content.ReadFromJsonAsync<ArchiveIntegrityResponse>();
         Assert.True(body?.IsValid);
         Assert.Equal(42, body?.ArchiveObjectId);
-        Assert.Equal("api-user", factory.ArchiveService.LastActor);
+        Assert.Equal("apikey:machine:1", factory.ArchiveService.LastActor);
     }
 
     [Fact]
@@ -191,19 +188,70 @@ public sealed class ArchiveApiIntegrationTests
     }
 
     [Fact]
-    public async Task DownloadAsync_WithoutActorReturnsValidationProblem()
+    public async Task ArchiveEndpoint_WithoutAuthenticationReturnsUnauthorized()
     {
         using var factory = new ApiTestFactory();
         using HttpClient client = factory.CreateClient();
 
-        HttpResponseMessage response = await client.GetAsync("/api/tenants/1/archive/42");
+        using var request = new HttpRequestMessage(HttpMethod.Get, "/api/tenants/1/archive/42");
+        request.Headers.Add("X-Test-Anonymous", "true");
+        HttpResponseMessage response = await client.SendAsync(request);
 
-        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
-        Assert.Equal("application/problem+json", response.Content.Headers.ContentType?.MediaType);
-        ValidationProblemDetails? problem =
-            await response.Content.ReadFromJsonAsync<ValidationProblemDetails>();
-        Assert.NotNull(problem);
-        Assert.Contains("X-Actor", problem.Errors.Keys);
+        Assert.Equal(HttpStatusCode.Unauthorized, response.StatusCode);
+    }
+
+    [Fact]
+    public async Task ArchiveEndpoint_WithoutRequiredPermissionReturnsForbidden()
+    {
+        using var factory = new ApiTestFactory();
+        using HttpClient client = factory.CreateClient();
+        using var request = new HttpRequestMessage(HttpMethod.Delete, "/api/tenants/1/archive/42");
+        request.Headers.Add("X-Test-Permissions", "archive.read");
+
+        HttpResponseMessage response = await client.SendAsync(request);
+
+        Assert.Equal(HttpStatusCode.Forbidden, response.StatusCode);
+        Assert.Null(factory.ArchiveService.LastTenantId);
+    }
+
+    public static TheoryData<HttpMethod, string> ProtectedArchiveEndpoints => new()
+    {
+        { HttpMethod.Post, "/api/tenants/1/archive" },
+        { HttpMethod.Get, "/api/tenants/1/archive/42" },
+        { HttpMethod.Get, "/api/tenants/1/archive/42/metadata" },
+        { HttpMethod.Head, "/api/tenants/1/archive/42" },
+        { HttpMethod.Get, "/api/tenants/1/archive/search" },
+        { HttpMethod.Get, "/api/tenants/1/archive/42/integrity-status" },
+        { HttpMethod.Post, "/api/tenants/1/archive/42/verify-integrity" },
+        { HttpMethod.Delete, "/api/tenants/1/archive/42" }
+    };
+
+    [Theory]
+    [MemberData(nameof(ProtectedArchiveEndpoints))]
+    public async Task EveryArchiveEndpoint_WithoutPermissionReturnsForbidden(HttpMethod method, string path)
+    {
+        using var factory = new ApiTestFactory();
+        using HttpClient client = factory.CreateClient();
+        using var request = new HttpRequestMessage(method, path);
+        request.Headers.Add("X-Test-Permissions", " ");
+
+        HttpResponseMessage response = await client.SendAsync(request);
+
+        Assert.Equal(HttpStatusCode.Forbidden, response.StatusCode);
+    }
+
+    [Fact]
+    public async Task ArchiveEndpoint_WithForeignRouteTenantReturnsNotFound()
+    {
+        using var factory = new ApiTestFactory();
+        using HttpClient client = factory.CreateClient();
+        using var request = new HttpRequestMessage(HttpMethod.Get, "/api/tenants/2/archive/42/metadata");
+        request.Headers.Add("X-Test-Tenant", "1");
+
+        HttpResponseMessage response = await client.SendAsync(request);
+
+        Assert.Equal(HttpStatusCode.NotFound, response.StatusCode);
+        Assert.Null(factory.ArchiveService.LastTenantId);
     }
 
     [Theory]
@@ -225,7 +273,6 @@ public sealed class ArchiveApiIntegrationTests
         using var request = new HttpRequestMessage(
             HttpMethod.Post,
             "/api/tenants/1/archive/42/verify-integrity");
-        request.Headers.Add("X-Actor", "api-user");
 
         HttpResponseMessage response = await client.SendAsync(request);
 

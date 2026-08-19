@@ -1,4 +1,5 @@
 <Solution>
+  <Project Path="MTSM.Cirrus.Admin/MTSM.Cirrus.Admin.csproj" />
   <Project Path="MTSM.Cirrus.API/MTSM.Cirrus.API.csproj" Id="a41b5036-3003-46b9-a7b0-c1f0538415c9" />
   <Project Path="MTSM.Cirrus.Core/MTSM.Cirrus.Core.csproj" Id="8d63b210-9af3-48fe-b283-14c68a5e6e22" />
   <Project Path="MTSM.Cirrus.Core.Tests/MTSM.Cirrus.Core.Tests.csproj" />

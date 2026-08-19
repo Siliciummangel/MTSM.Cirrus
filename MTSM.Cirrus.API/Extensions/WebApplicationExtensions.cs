@@ -15,6 +15,8 @@ public static class WebApplicationExtensions
 
         app.UseHttpsRedirection();
 
+        app.UseAuthentication();
+        app.UseRateLimiter();
         app.UseAuthorization();
 
         app.MapControllers();
@@ -24,7 +26,7 @@ public static class WebApplicationExtensions
             new HealthCheckOptions
             {
                 Predicate = _ => false
-            });
+            }).AllowAnonymous();
 
         app.MapHealthChecks(
             "/health/ready",
@@ -32,7 +34,7 @@ public static class WebApplicationExtensions
             {
                 Predicate = registration =>
                     registration.Tags.Contains("ready")
-            });
+            }).RequireAuthorization();
 
         if (app.Environment.IsDevelopment())
         {

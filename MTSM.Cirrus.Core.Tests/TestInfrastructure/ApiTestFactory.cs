@@ -1,11 +1,16 @@
 using Microsoft.AspNetCore.Hosting;
+using Microsoft.AspNetCore.Authentication;
 using Microsoft.AspNetCore.Mvc.Testing;
 using Microsoft.AspNetCore.TestHost;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
 using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Options;
+using MTSM.Cirrus.API.Security;
 using MTSM.Cirrus.Core.Abstractions;
 using MTSM.Cirrus.Core.Models;
+using System.Security.Claims;
+using System.Text.Encodings.Web;
 
 namespace MTSM.Cirrus.Core.Tests.TestInfrastructure;
 
@@ -19,9 +24,45 @@ internal sealed class ApiTestFactory : WebApplicationFactory<Program>
         builder.ConfigureLogging(logging => logging.ClearProviders());
         builder.ConfigureTestServices(services =>
         {
+            services.AddAuthentication(options =>
+            {
+                options.DefaultAuthenticateScheme = TestAuthenticationHandler.SchemeName;
+                options.DefaultChallengeScheme = TestAuthenticationHandler.SchemeName;
+            }).AddScheme<AuthenticationSchemeOptions, TestAuthenticationHandler>(
+                TestAuthenticationHandler.SchemeName, _ => { });
             services.RemoveAll<IArchiveService>();
             services.AddSingleton<IArchiveService>(ArchiveService);
         });
+    }
+}
+
+internal sealed class TestAuthenticationHandler(
+    IOptionsMonitor<AuthenticationSchemeOptions> options,
+    ILoggerFactory logger,
+    UrlEncoder encoder)
+    : AuthenticationHandler<AuthenticationSchemeOptions>(options, logger, encoder)
+{
+    public const string SchemeName = "Test";
+
+    protected override Task<AuthenticateResult> HandleAuthenticateAsync()
+    {
+        if (Request.Headers.ContainsKey("X-Test-Anonymous"))
+            return Task.FromResult(AuthenticateResult.NoResult());
+
+        string[] permissions = Request.Headers.TryGetValue("X-Test-Permissions", out var configured)
+            ? configured.ToString().Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+            : ["archive.read", "archive.write", "archive.delete", "archive.verify"];
+        string tenantId = Request.Headers.TryGetValue("X-Test-Tenant", out var tenant) ? tenant.ToString() : "1";
+        var claims = new List<Claim>
+        {
+            new(ClaimTypes.NameIdentifier, "machine:1"),
+            new(CirrusClaimTypes.TenantId, tenantId),
+            new(CirrusClaimTypes.Actor, "apikey:machine:1"),
+            new(CirrusClaimTypes.Provider, SchemeName)
+        };
+        claims.AddRange(permissions.Select(value => new Claim(CirrusClaimTypes.Permission, value)));
+        var principal = new ClaimsPrincipal(new ClaimsIdentity(claims, SchemeName));
+        return Task.FromResult(AuthenticateResult.Success(new AuthenticationTicket(principal, SchemeName)));
     }
 }
 
