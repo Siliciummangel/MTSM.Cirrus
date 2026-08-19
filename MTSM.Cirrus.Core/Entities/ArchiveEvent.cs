@@ -7,6 +7,8 @@ public sealed class ArchiveEvent
 {
     public long ArchiveEventId { get; set; }
 
+    public long TenantId { get; set; }
+
     public long ArchiveObjectId { get; set; }
 
     public ArchiveEventType EventType { get; set; }

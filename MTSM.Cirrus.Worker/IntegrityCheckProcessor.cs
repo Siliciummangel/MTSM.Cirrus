@@ -422,6 +422,7 @@ public sealed class IntegrityCheckProcessor(
 
         archiveObject.Events.Add(new ArchiveEvent
         {
+            TenantId = archiveObject.TenantId,
             EventType = ArchiveEventType.ErrorOccurred,
             EventTimestamp = now,
             Actor = $"archive-worker/{leaseOwner}",

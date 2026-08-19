@@ -35,6 +35,17 @@ public sealed class ArchiveServiceIntegrationTests(PostgresFixture fixture)
             service.RequestDeletionAsync(2, archived.ArchiveObjectId, "foreign-deleter"));
 
         Assert.NotNull(await service.GetMetadataAsync(1, archived.ArchiveObjectId));
+
+        dbContext.ChangeTracker.Clear();
+        dbContext.ArchiveEvents.Add(new ArchiveEvent
+        {
+            TenantId = 2,
+            ArchiveObjectId = archived.ArchiveObjectId,
+            EventType = ArchiveEventType.Downloaded,
+            EventTimestamp = DateTimeOffset.UtcNow,
+            Actor = "illegal-cross-tenant-event"
+        });
+        await Assert.ThrowsAsync<DbUpdateException>(() => dbContext.SaveChangesAsync());
     }
 
     [PostgresFact]
@@ -118,6 +129,8 @@ public sealed class ArchiveServiceIntegrationTests(PostgresFixture fixture)
         Assert.Equal(
             [ArchiveEventType.Created, ArchiveEventType.Archived],
             persisted.Events.OrderBy(item => item.EventTimestamp).Select(item => item.EventType));
+        Assert.All(persisted.Events, archiveEvent =>
+            Assert.Equal(1, archiveEvent.TenantId));
         Assert.True(await storage.ExistsAsync(persisted.BucketName, persisted.ObjectKey));
 
         ArchiveMetadataResult? metadata = await service.GetMetadataAsync(1, result.ArchiveObjectId);

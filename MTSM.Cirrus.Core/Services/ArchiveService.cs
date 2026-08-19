@@ -129,6 +129,7 @@ public sealed class ArchiveService : IArchiveService
 
         archiveObject.Events.Add(new ArchiveEvent
         {
+            TenantId = archiveObject.TenantId,
             EventType = ArchiveEventType.Created,
             EventTimestamp = now,
             Actor = createdBy
@@ -185,6 +186,7 @@ public sealed class ArchiveService : IArchiveService
 
             archiveObject.Events.Add(new ArchiveEvent
             {
+                TenantId = archiveObject.TenantId,
                 EventType = ArchiveEventType.Archived,
                 EventTimestamp = archivedAt,
                 Actor = request.CreatedBy
@@ -310,6 +312,7 @@ public sealed class ArchiveService : IArchiveService
 
         archiveObject.Events.Add(new ArchiveEvent
         {
+            TenantId = archiveObject.TenantId,
             EventType = ArchiveEventType.Downloaded,
             EventTimestamp = DateTimeOffset.UtcNow,
             Actor = normalizedActor
@@ -628,6 +631,7 @@ public sealed class ArchiveService : IArchiveService
 
             archiveObject.Events.Add(new ArchiveEvent
             {
+                TenantId = archiveObject.TenantId,
                 EventType = isValid
                 ? ArchiveEventType.IntegrityVerified
                 : ArchiveEventType.IntegrityCheckFailed,
@@ -718,7 +722,8 @@ public sealed class ArchiveService : IArchiveService
             await _dbContext.ArchiveEvents
                 .AsNoTracking()
                 .Where(archiveEvent =>
-                    archiveEvent.ArchiveObjectId == archiveObjectId
+                    archiveEvent.TenantId == tenantId
+                    && archiveEvent.ArchiveObjectId == archiveObjectId
                     && (archiveEvent.EventType ==
                             ArchiveEventType.IntegrityVerified
                         || archiveEvent.EventType ==
@@ -819,6 +824,7 @@ public sealed class ArchiveService : IArchiveService
                                 archiveObject.Events.Add(
                                 new ArchiveEvent
                                 {
+                                    TenantId = archiveObject.TenantId,
                                     EventType =
                                         ArchiveEventType.DeletionRequested,
 
@@ -1331,6 +1337,7 @@ public sealed class ArchiveService : IArchiveService
 
             archiveObject.Events.Add(new ArchiveEvent
             {
+                TenantId = archiveObject.TenantId,
                 EventType =
                     ArchiveEventType.ErrorOccurred,
 

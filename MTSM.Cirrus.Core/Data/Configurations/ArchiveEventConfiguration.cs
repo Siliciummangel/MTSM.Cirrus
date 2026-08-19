@@ -16,6 +16,9 @@ public sealed class ArchiveEventConfiguration
         builder.Property(x => x.ArchiveEventId)
             .ValueGeneratedOnAdd();
 
+        builder.Property(x => x.TenantId)
+            .IsRequired();
+
         builder.Property(x => x.EventType)
             .HasConversion<string>()
             .HasMaxLength(100)
@@ -35,15 +38,36 @@ public sealed class ArchiveEventConfiguration
 
         builder.HasIndex(x => new
         {
+            x.TenantId,
             x.ArchiveObjectId,
             x.EventTimestamp
         });
 
-        builder.HasIndex(x => x.EventType);
+        builder.HasIndex(x => new
+        {
+            x.TenantId,
+            x.EventTimestamp
+        });
+
+        builder.HasIndex(x => new
+        {
+            x.TenantId,
+            x.EventType,
+            x.EventTimestamp
+        });
 
         builder.HasOne(x => x.ArchiveObject)
             .WithMany(x => x.Events)
-            .HasForeignKey(x => x.ArchiveObjectId)
+            .HasForeignKey(x => new
+            {
+                x.TenantId,
+                x.ArchiveObjectId
+            })
+            .HasPrincipalKey(x => new
+            {
+                x.TenantId,
+                x.ArchiveObjectId
+            })
             .OnDelete(DeleteBehavior.Cascade);
     }
 }

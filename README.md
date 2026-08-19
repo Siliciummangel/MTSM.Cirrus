@@ -1898,6 +1898,11 @@ as an indexed, denormalized dimension for efficient lookup and statistics. A com
 foreign key `(TenantId, ArchiveObjectId)` guarantees that it always matches the owning
 archive object and cannot establish a second ownership source.
 
+Archive events follow the same rule: `TenantId` is copied from the archive object and
+protected by the composite foreign key `(TenantId, ArchiveObjectId)`. Tenant-leading
+indexes support efficient audit exports, event statistics and chronological queries
+without weakening the tenant boundary.
+
 The background worker retains system-wide visibility but carries the persisted tenant ID
 into each integrity operation and skips disabled tenants.
 
