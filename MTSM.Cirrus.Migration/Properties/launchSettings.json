@@ -1,0 +1,10 @@
+{
+  "profiles": {
+    "MTSM.Cirrus.Migration": {
+      "commandName": "Project"
+    },
+    "Container (Dockerfile)": {
+      "commandName": "Docker"
+    }
+  }
+}
