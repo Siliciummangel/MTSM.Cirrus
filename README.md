@@ -1934,13 +1934,14 @@ archive-migrate
 
 ### Docker Compose
 
-A future Docker Compose setup is expected to include:
+The repository contains a local Docker Compose environment with:
 
 - PostgreSQL
-- S3-compatible object storage
+- SeaweedFS as S3-compatible object storage
 - `archive-migrate`
 - `archive-api`
 - `archive-worker`
+- An on-demand `archive-admin` CLI
 
 Conceptual startup order:
 
@@ -1954,9 +1955,27 @@ PostgreSQL and object storage
  archive-api + archive-worker
 ```
 
-The migration process should complete successfully before the API and worker are updated to a schema-dependent application version.
+The migration container must complete successfully before Compose starts the API
+and worker. Configuration is read from a local `.env` file. The tracked
+`.env.example` documents every required value without committing the active local
+credentials.
 
-> Docker Compose files are planned as part of deployment polishing and may not yet be included in the repository.
+See [Local Docker Compose environment](docs/local-compose.md) for setup,
+operation and data-reset instructions.
+
+For a single-host Linux deployment using versioned GHCR images, external
+PostgreSQL and external S3-compatible storage, see
+[Production deployment with Docker Compose](docs/production-compose.md).
+
+For a self-contained, non-high-availability Linux installation that bundles
+PostgreSQL and SeaweedFS with Cirrus, see
+[Standalone deployment with Docker Compose](docs/standalone-compose.md).
+
+| Compose file | Intended use | PostgreSQL and S3 |
+|---|---|---|
+| `compose.yaml` | Local development | Bundled development services |
+| `compose.production.yaml` | Recommended single-host production application deployment | Externally operated services |
+| `compose.standalone.yaml` | Small self-contained installation without high availability | Bundled persistent services |
 
 ---
 

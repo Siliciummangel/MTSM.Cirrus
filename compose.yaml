@@ -1,0 +1,141 @@
+name: mtsm-cirrus
+
+x-cirrus-environment: &cirrus-environment
+  ConnectionStrings__ArchiveDatabase: Host=postgres;Port=5432;Database=${CIRRUS_POSTGRES_DATABASE};Username=${CIRRUS_POSTGRES_USER};Password=${CIRRUS_POSTGRES_PASSWORD};GSS Encryption Mode=Disable
+  S3__ServiceUrl: http://storage:8333
+  S3__AccessKey: ${CIRRUS_S3_ACCESS_KEY}
+  S3__SecretKey: ${CIRRUS_S3_SECRET_KEY}
+  S3__Region: ${CIRRUS_S3_REGION}
+  S3__ForcePathStyle: "true"
+  S3__CreateBucketIfMissing: "true"
+  S3__UseChunkEncoding: "false"
+  S3__DisableDefaultChecksumValidation: "true"
+  Logging__LogLevel__Default: ${CIRRUS_LOG_LEVEL_DEFAULT}
+  Logging__LogLevel__Microsoft.AspNetCore: ${CIRRUS_LOG_LEVEL_ASPNETCORE}
+  Logging__LogLevel__Microsoft.EntityFrameworkCore.Database.Command: ${CIRRUS_LOG_LEVEL_EF_COMMANDS}
+
+services:
+  postgres:
+    image: postgres:18
+    environment:
+      POSTGRES_DB: ${CIRRUS_POSTGRES_DATABASE}
+      POSTGRES_USER: ${CIRRUS_POSTGRES_USER}
+      POSTGRES_PASSWORD: ${CIRRUS_POSTGRES_PASSWORD}
+    ports:
+      - "127.0.0.1:${CIRRUS_POSTGRES_PORT}:5432"
+    volumes:
+      - postgres-data:/var/lib/postgresql
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready --username=$${POSTGRES_USER} --dbname=$${POSTGRES_DB}"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+      start_period: 10s
+    restart: unless-stopped
+
+  storage:
+    image: chrislusf/seaweedfs:4.42
+    command: ["mini", "-dir=/data"]
+    environment:
+      AWS_ACCESS_KEY_ID: ${CIRRUS_S3_ACCESS_KEY}
+      AWS_SECRET_ACCESS_KEY: ${CIRRUS_S3_SECRET_KEY}
+    ports:
+      - "127.0.0.1:${CIRRUS_S3_PORT}:8333"
+    volumes:
+      - storage-data:/data
+    healthcheck:
+      test: ["CMD", "wget", "--quiet", "--spider", "http://localhost:9333/cluster/status"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+      start_period: 10s
+    restart: unless-stopped
+
+  migrate:
+    build:
+      context: .
+      dockerfile: MTSM.Cirrus.Migration/Dockerfile
+    image: mtsm-cirrus-migrate:local
+    environment:
+      <<: *cirrus-environment
+      DOTNET_ENVIRONMENT: Development
+    depends_on:
+      postgres:
+        condition: service_healthy
+    restart: "no"
+
+  api:
+    build:
+      context: .
+      dockerfile: MTSM.Cirrus.API/Dockerfile
+    image: mtsm-cirrus-api:local
+    environment:
+      <<: *cirrus-environment
+      ASPNETCORE_ENVIRONMENT: Development
+      ASPNETCORE_HTTP_PORTS: "8080"
+      Api__MaxMultipartUploadSizeBytes: ${CIRRUS_API_MAX_MULTIPART_UPLOAD_SIZE_BYTES}
+      Api__RateLimitPermitCount: ${CIRRUS_API_RATE_LIMIT_PERMIT_COUNT}
+      Api__RateLimitWindowSeconds: ${CIRRUS_API_RATE_LIMIT_WINDOW_SECONDS}
+      AllowedHosts: ${CIRRUS_ALLOWED_HOSTS}
+    ports:
+      - "127.0.0.1:${CIRRUS_API_PORT}:8080"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      storage:
+        condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
+    restart: unless-stopped
+
+  worker:
+    build:
+      context: .
+      dockerfile: MTSM.Cirrus.Worker/Dockerfile
+    image: mtsm-cirrus-worker:local
+    environment:
+      <<: *cirrus-environment
+      DOTNET_ENVIRONMENT: Development
+      IntegrityChecks__Enabled: ${CIRRUS_INTEGRITY_CHECKS_ENABLED}
+      IntegrityChecks__InitialVerificationDelayHours: ${CIRRUS_INTEGRITY_INITIAL_VERIFICATION_DELAY_HOURS}
+      IntegrityChecks__ReverificationIntervalDays: ${CIRRUS_INTEGRITY_REVERIFICATION_INTERVAL_DAYS}
+      IntegrityChecks__FailureRetryDelayMinutes: ${CIRRUS_INTEGRITY_FAILURE_RETRY_DELAY_MINUTES}
+      IntegrityChecks__PollingIntervalSeconds: ${CIRRUS_INTEGRITY_POLLING_INTERVAL_SECONDS}
+      IntegrityChecks__BatchSize: ${CIRRUS_INTEGRITY_BATCH_SIZE}
+      IntegrityChecks__MaxConcurrentChecks: ${CIRRUS_INTEGRITY_MAX_CONCURRENT_CHECKS}
+      IntegrityChecks__LeaseDurationMinutes: ${CIRRUS_INTEGRITY_LEASE_DURATION_MINUTES}
+      Purge__Enabled: ${CIRRUS_PURGE_ENABLED}
+      Purge__PollingIntervalSeconds: ${CIRRUS_PURGE_POLLING_INTERVAL_SECONDS}
+      Purge__BatchSize: ${CIRRUS_PURGE_BATCH_SIZE}
+      Purge__MaxConcurrentDeletes: ${CIRRUS_PURGE_MAX_CONCURRENT_DELETES}
+      Purge__LeaseDurationMinutes: ${CIRRUS_PURGE_LEASE_DURATION_MINUTES}
+      Purge__InitialRetryDelayMinutes: ${CIRRUS_PURGE_INITIAL_RETRY_DELAY_MINUTES}
+      Purge__MaximumRetryDelayMinutes: ${CIRRUS_PURGE_MAXIMUM_RETRY_DELAY_MINUTES}
+    depends_on:
+      postgres:
+        condition: service_healthy
+      storage:
+        condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
+    restart: unless-stopped
+
+  admin:
+    profiles: ["tools"]
+    build:
+      context: .
+      dockerfile: MTSM.Cirrus.Admin/Dockerfile
+    image: mtsm-cirrus-admin:local
+    environment:
+      <<: *cirrus-environment
+      DOTNET_ENVIRONMENT: Development
+    depends_on:
+      postgres:
+        condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
+    restart: "no"
+
+volumes:
+  postgres-data:
+  storage-data:

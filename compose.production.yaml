@@ -1,0 +1,138 @@
+name: mtsm-cirrus
+
+x-cirrus-environment: &cirrus-environment
+  ConnectionStrings__ArchiveDatabase: ${CIRRUS_DATABASE_CONNECTION_STRING:?Set CIRRUS_DATABASE_CONNECTION_STRING}
+  S3__ServiceUrl: ${CIRRUS_S3_SERVICE_URL:?Set CIRRUS_S3_SERVICE_URL}
+  S3__AccessKey: ${CIRRUS_S3_ACCESS_KEY:?Set CIRRUS_S3_ACCESS_KEY}
+  S3__SecretKey: ${CIRRUS_S3_SECRET_KEY:?Set CIRRUS_S3_SECRET_KEY}
+  S3__Region: ${CIRRUS_S3_REGION:-us-east-1}
+  S3__ForcePathStyle: ${CIRRUS_S3_FORCE_PATH_STYLE:-true}
+  S3__CreateBucketIfMissing: ${CIRRUS_S3_CREATE_BUCKET_IF_MISSING:-false}
+  S3__UseChunkEncoding: ${CIRRUS_S3_USE_CHUNK_ENCODING:-true}
+  S3__DisableDefaultChecksumValidation: ${CIRRUS_S3_DISABLE_DEFAULT_CHECKSUM_VALIDATION:-false}
+  Logging__LogLevel__Default: ${CIRRUS_LOG_LEVEL_DEFAULT:-Information}
+  Logging__LogLevel__Microsoft.AspNetCore: ${CIRRUS_LOG_LEVEL_ASPNETCORE:-Warning}
+  Logging__LogLevel__Microsoft.EntityFrameworkCore.Database.Command: ${CIRRUS_LOG_LEVEL_EF_COMMANDS:-Warning}
+
+x-runtime-defaults: &runtime-defaults
+  init: true
+  restart: unless-stopped
+  security_opt:
+    - no-new-privileges:true
+  cap_drop:
+    - ALL
+  read_only: true
+  tmpfs:
+    - /tmp:rw,noexec,nosuid,nodev,size=64m
+  logging:
+    driver: json-file
+    options:
+      max-size: 10m
+      max-file: "5"
+
+services:
+  migrate:
+    <<: *runtime-defaults
+    image: ${CIRRUS_IMAGE_PREFIX:-ghcr.io/siliciummangel/mtsm-cirrus}-migrate:${CIRRUS_VERSION:?Set CIRRUS_VERSION}
+    environment:
+      <<: *cirrus-environment
+      DOTNET_ENVIRONMENT: Production
+    restart: "no"
+    deploy:
+      resources:
+        limits:
+          cpus: "1.0"
+          memory: 512M
+          pids: 200
+        reservations:
+          cpus: "0.10"
+          memory: 128M
+
+  api:
+    <<: *runtime-defaults
+    image: ${CIRRUS_IMAGE_PREFIX:-ghcr.io/siliciummangel/mtsm-cirrus}-api:${CIRRUS_VERSION:?Set CIRRUS_VERSION}
+    environment:
+      <<: *cirrus-environment
+      ASPNETCORE_ENVIRONMENT: Production
+      ASPNETCORE_HTTP_PORTS: "8080"
+      ASPNETCORE_FORWARDEDHEADERS_ENABLED: "true"
+      Api__MaxMultipartUploadSizeBytes: ${CIRRUS_API_MAX_MULTIPART_UPLOAD_SIZE_BYTES:-1073741824}
+      Api__RateLimitPermitCount: ${CIRRUS_API_RATE_LIMIT_PERMIT_COUNT:-300}
+      Api__RateLimitWindowSeconds: ${CIRRUS_API_RATE_LIMIT_WINDOW_SECONDS:-60}
+      AllowedHosts: ${CIRRUS_ALLOWED_HOSTS:?Set CIRRUS_ALLOWED_HOSTS}
+    ports:
+      - "${CIRRUS_BIND_ADDRESS:-127.0.0.1}:${CIRRUS_API_PORT:-8080}:8080"
+    volumes:
+      - api-data-protection:/home/app/.aspnet/DataProtection-Keys
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+    stop_grace_period: 30s
+    deploy:
+      resources:
+        limits:
+          cpus: "1.0"
+          memory: 768M
+          pids: 200
+        reservations:
+          cpus: "0.25"
+          memory: 256M
+
+  worker:
+    <<: *runtime-defaults
+    image: ${CIRRUS_IMAGE_PREFIX:-ghcr.io/siliciummangel/mtsm-cirrus}-worker:${CIRRUS_VERSION:?Set CIRRUS_VERSION}
+    environment:
+      <<: *cirrus-environment
+      DOTNET_ENVIRONMENT: Production
+      IntegrityChecks__Enabled: ${CIRRUS_INTEGRITY_CHECKS_ENABLED:-true}
+      IntegrityChecks__InitialVerificationDelayHours: ${CIRRUS_INTEGRITY_INITIAL_VERIFICATION_DELAY_HOURS:-24}
+      IntegrityChecks__ReverificationIntervalDays: ${CIRRUS_INTEGRITY_REVERIFICATION_INTERVAL_DAYS:-180}
+      IntegrityChecks__FailureRetryDelayMinutes: ${CIRRUS_INTEGRITY_FAILURE_RETRY_DELAY_MINUTES:-60}
+      IntegrityChecks__PollingIntervalSeconds: ${CIRRUS_INTEGRITY_POLLING_INTERVAL_SECONDS:-60}
+      IntegrityChecks__BatchSize: ${CIRRUS_INTEGRITY_BATCH_SIZE:-10}
+      IntegrityChecks__MaxConcurrentChecks: ${CIRRUS_INTEGRITY_MAX_CONCURRENT_CHECKS:-2}
+      IntegrityChecks__LeaseDurationMinutes: ${CIRRUS_INTEGRITY_LEASE_DURATION_MINUTES:-30}
+      Purge__Enabled: ${CIRRUS_PURGE_ENABLED:-true}
+      Purge__PollingIntervalSeconds: ${CIRRUS_PURGE_POLLING_INTERVAL_SECONDS:-60}
+      Purge__BatchSize: ${CIRRUS_PURGE_BATCH_SIZE:-10}
+      Purge__MaxConcurrentDeletes: ${CIRRUS_PURGE_MAX_CONCURRENT_DELETES:-2}
+      Purge__LeaseDurationMinutes: ${CIRRUS_PURGE_LEASE_DURATION_MINUTES:-30}
+      Purge__InitialRetryDelayMinutes: ${CIRRUS_PURGE_INITIAL_RETRY_DELAY_MINUTES:-5}
+      Purge__MaximumRetryDelayMinutes: ${CIRRUS_PURGE_MAXIMUM_RETRY_DELAY_MINUTES:-1440}
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+    stop_grace_period: 2m
+    deploy:
+      resources:
+        limits:
+          cpus: "1.0"
+          memory: 768M
+          pids: 200
+        reservations:
+          cpus: "0.25"
+          memory: 256M
+
+  admin:
+    <<: *runtime-defaults
+    profiles: ["tools"]
+    image: ${CIRRUS_IMAGE_PREFIX:-ghcr.io/siliciummangel/mtsm-cirrus}-admin:${CIRRUS_VERSION:?Set CIRRUS_VERSION}
+    environment:
+      <<: *cirrus-environment
+      DOTNET_ENVIRONMENT: Production
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+    restart: "no"
+    deploy:
+      resources:
+        limits:
+          cpus: "1.0"
+          memory: 512M
+          pids: 200
+        reservations:
+          cpus: "0.10"
+          memory: 128M
+
+volumes:
+  api-data-protection:
