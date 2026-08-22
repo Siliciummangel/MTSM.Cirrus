@@ -291,7 +291,7 @@ Configure monitoring for at least:
 
 - Container restart count and availability
 - `/health/live`
-- Authenticated `/health/ready`
+- `/health/ready` (aggregate status only)
 - PostgreSQL availability, capacity and backup status
 - Object-storage availability, capacity, replication and backup status
 - Disk capacity for Docker logs and images

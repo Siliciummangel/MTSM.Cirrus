@@ -194,7 +194,7 @@ Important limitations include:
 - API-key authentication is the only provider shipped for 1.0; JWT and mTLS
   integrations are extension points rather than bundled implementations.
 - WORM-related metadata does not provide WORM guarantees.
-- Operational deployment manifests are not yet included.
+- The bundled Helm chart expects externally operated PostgreSQL and S3-compatible storage.
 - Backward compatibility is not guaranteed before version `1.0.0`.
 - The API and worker contracts may still change before `0.2.0`.
 
@@ -1712,7 +1712,6 @@ Example:
 
 ```bash
 curl \
-  --header "Authorization: ApiKey ${CIRRUS_API_KEY}" \
   "${BASE_URL}/health/ready"
 ```
 
@@ -1720,6 +1719,8 @@ Purpose:
 
 - Indicates whether the application is ready to serve requests.
 - Includes health checks tagged with `ready`.
+- Is anonymous and returns only the aggregate health status so Kubernetes can
+  probe it without storing an application API key in the Pod specification.
 
 Current readiness dependencies should be verified against the active health-check registrations.
 
@@ -1981,7 +1982,7 @@ PostgreSQL and SeaweedFS with Cirrus, see
 
 ### Kubernetes
 
-The intended Kubernetes deployment model includes:
+The supported Helm deployment includes:
 
 - API `Deployment`
 - API `Service`
@@ -1994,6 +1995,10 @@ The intended Kubernetes deployment model includes:
 - Ingress or Gateway API resource
 - Optional PodDisruptionBudget
 - Optional NetworkPolicies
+
+Installation, secret preparation, upgrades, rollback behavior and validation
+are documented in [Kubernetes deployment with Helm](docs/kubernetes-helm.md).
+The chart is located at `deploy/helm/cirrus`.
 
 Conceptual migration flow:
 

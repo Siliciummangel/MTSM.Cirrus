@@ -108,12 +108,12 @@ wrong, a credential expired or an identity was disabled.
 ## Health and API documentation
 
 - `/health/live` is anonymous and intentionally contains no dependency detail.
-- `/health/ready` requires authentication.
+- `/health/ready` is anonymous and intentionally returns only the aggregate
+  dependency state needed by the Kubernetes readiness probe.
 - OpenAPI and Scalar are only mapped in the Development environment.
 
-Operational platforms that need an anonymous readiness probe should expose it
-only on a private management listener or provide a valid read-only key. Do not
-make the archive API anonymous to accommodate monitoring.
+Do not add diagnostic details to anonymous health responses. Restrict public
+access to health routes at the Ingress or Gateway where practical.
 
 ## Operational requirements
 

@@ -1,0 +1,73 @@
+image:
+  repositoryPrefix: ghcr.io/siliciummangel/mtsm-cirrus
+  tag: "0.1.0"
+  pullPolicy: IfNotPresent
+
+imagePullSecrets: []
+nameOverride: ""
+fullnameOverride: ""
+
+api:
+  replicas: 2
+  service:
+    type: ClusterIP
+    port: 80
+  resources:
+    requests: { cpu: 250m, memory: 256Mi }
+    limits: { cpu: "1", memory: 768Mi }
+
+worker:
+  replicas: 1
+  terminationGracePeriodSeconds: 120
+  resources:
+    requests: { cpu: 250m, memory: 256Mi }
+    limits: { cpu: "1", memory: 768Mi }
+
+migration:
+  resources:
+    requests: { cpu: 100m, memory: 128Mi }
+    limits: { cpu: "1", memory: 512Mi }
+
+config:
+  allowedHosts: "*"
+  s3ServiceUrl: ""
+  s3Region: us-east-1
+  s3ForcePathStyle: "true"
+  s3CreateBucketIfMissing: "false"
+  s3UseChunkEncoding: "true"
+  s3DisableDefaultChecksumValidation: "false"
+  maxMultipartUploadSizeBytes: "1073741824"
+  rateLimitPermitCount: "300"
+  rateLimitWindowSeconds: "60"
+  integrityChecksEnabled: "true"
+  integrityInitialVerificationDelayHours: "24"
+  integrityReverificationIntervalDays: "180"
+  integrityFailureRetryDelayMinutes: "60"
+  integrityPollingIntervalSeconds: "60"
+  integrityBatchSize: "10"
+  integrityMaxConcurrentChecks: "2"
+  integrityLeaseDurationMinutes: "30"
+  purgeEnabled: "true"
+  purgePollingIntervalSeconds: "60"
+  purgeBatchSize: "10"
+  purgeMaxConcurrentDeletes: "2"
+  purgeLeaseDurationMinutes: "30"
+  purgeInitialRetryDelayMinutes: "5"
+  purgeMaximumRetryDelayMinutes: "1440"
+  logLevelDefault: Information
+  logLevelAspNetCore: Warning
+  logLevelEfCommands: Warning
+
+secrets:
+  # Prefer existingSecret in production. The named Secret must contain the
+  # keys connection-string, s3-access-key and s3-secret-key.
+  existingSecret: ""
+  connectionString: ""
+  s3AccessKey: ""
+  s3SecretKey: ""
+
+podAnnotations: {}
+podLabels: {}
+nodeSelector: {}
+tolerations: []
+affinity: {}

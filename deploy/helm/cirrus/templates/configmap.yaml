@@ -1,0 +1,35 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "cirrus.fullname" . }}-config
+  labels:
+    {{- include "cirrus.labels" . | nindent 4 }}
+data:
+  S3__ServiceUrl: {{ required "config.s3ServiceUrl is required" .Values.config.s3ServiceUrl | quote }}
+  S3__Region: {{ .Values.config.s3Region | quote }}
+  S3__ForcePathStyle: {{ .Values.config.s3ForcePathStyle | quote }}
+  S3__CreateBucketIfMissing: {{ .Values.config.s3CreateBucketIfMissing | quote }}
+  S3__UseChunkEncoding: {{ .Values.config.s3UseChunkEncoding | quote }}
+  S3__DisableDefaultChecksumValidation: {{ .Values.config.s3DisableDefaultChecksumValidation | quote }}
+  Api__MaxMultipartUploadSizeBytes: {{ .Values.config.maxMultipartUploadSizeBytes | quote }}
+  Api__RateLimitPermitCount: {{ .Values.config.rateLimitPermitCount | quote }}
+  Api__RateLimitWindowSeconds: {{ .Values.config.rateLimitWindowSeconds | quote }}
+  AllowedHosts: {{ .Values.config.allowedHosts | quote }}
+  IntegrityChecks__Enabled: {{ .Values.config.integrityChecksEnabled | quote }}
+  IntegrityChecks__InitialVerificationDelayHours: {{ .Values.config.integrityInitialVerificationDelayHours | quote }}
+  IntegrityChecks__ReverificationIntervalDays: {{ .Values.config.integrityReverificationIntervalDays | quote }}
+  IntegrityChecks__FailureRetryDelayMinutes: {{ .Values.config.integrityFailureRetryDelayMinutes | quote }}
+  IntegrityChecks__PollingIntervalSeconds: {{ .Values.config.integrityPollingIntervalSeconds | quote }}
+  IntegrityChecks__BatchSize: {{ .Values.config.integrityBatchSize | quote }}
+  IntegrityChecks__MaxConcurrentChecks: {{ .Values.config.integrityMaxConcurrentChecks | quote }}
+  IntegrityChecks__LeaseDurationMinutes: {{ .Values.config.integrityLeaseDurationMinutes | quote }}
+  Purge__Enabled: {{ .Values.config.purgeEnabled | quote }}
+  Purge__PollingIntervalSeconds: {{ .Values.config.purgePollingIntervalSeconds | quote }}
+  Purge__BatchSize: {{ .Values.config.purgeBatchSize | quote }}
+  Purge__MaxConcurrentDeletes: {{ .Values.config.purgeMaxConcurrentDeletes | quote }}
+  Purge__LeaseDurationMinutes: {{ .Values.config.purgeLeaseDurationMinutes | quote }}
+  Purge__InitialRetryDelayMinutes: {{ .Values.config.purgeInitialRetryDelayMinutes | quote }}
+  Purge__MaximumRetryDelayMinutes: {{ .Values.config.purgeMaximumRetryDelayMinutes | quote }}
+  Logging__LogLevel__Default: {{ .Values.config.logLevelDefault | quote }}
+  Logging__LogLevel__Microsoft.AspNetCore: {{ .Values.config.logLevelAspNetCore | quote }}
+  Logging__LogLevel__Microsoft.EntityFrameworkCore.Database.Command: {{ .Values.config.logLevelEfCommands | quote }}

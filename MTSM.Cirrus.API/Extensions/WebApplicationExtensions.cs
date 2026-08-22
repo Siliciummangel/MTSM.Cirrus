@@ -34,7 +34,7 @@ public static class WebApplicationExtensions
             {
                 Predicate = registration =>
                     registration.Tags.Contains("ready")
-            }).RequireAuthorization();
+            }).AllowAnonymous();
 
         if (app.Environment.IsDevelopment())
         {
