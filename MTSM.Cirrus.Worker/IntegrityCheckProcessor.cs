@@ -103,12 +103,10 @@ public sealed class IntegrityCheckProcessor(
         CirrusDbContext dbContext =
             scope.ServiceProvider.GetRequiredService<CirrusDbContext>();
 
-        await dbContext.Database.ExecuteSqlInterpolatedAsync(
+        WorkItem[] workItems = await dbContext.Database
+            .SqlQuery<WorkItem>(
             $"""
-            UPDATE cirrus.archive_object AS archive_object
-            SET integrity_check_lease_owner = {leaseOwner},
-                integrity_check_lease_until = {leaseUntil}
-            WHERE archive_object.archive_object_id IN (
+            WITH candidates AS MATERIALIZED (
                 SELECT candidate.archive_object_id
                 FROM cirrus.archive_object AS candidate
                 INNER JOIN cirrus.tenant AS tenant
@@ -122,21 +120,28 @@ public sealed class IntegrityCheckProcessor(
                         OR candidate.integrity_check_lease_until <= {now})
                 ORDER BY candidate.next_integrity_check_at,
                     candidate.archive_object_id
-                FOR UPDATE SKIP LOCKED
+                FOR UPDATE OF candidate SKIP LOCKED
                 LIMIT {_options.BatchSize}
+            ),
+            claimed AS (
+                UPDATE cirrus.archive_object AS archive_object
+                SET integrity_check_lease_owner = {leaseOwner},
+                    integrity_check_lease_until = {leaseUntil}
+                FROM candidates
+                WHERE archive_object.archive_object_id =
+                    candidates.archive_object_id
+                RETURNING
+                    archive_object.archive_object_id,
+                    archive_object.tenant_id
             )
-            """,
-            cancellationToken);
-
-        return await dbContext.ArchiveObjects
-            .AsNoTracking()
-            .Where(archiveObject =>
-                archiveObject.IntegrityCheckLeaseOwner == leaseOwner)
-            .OrderBy(archiveObject => archiveObject.ArchiveObjectId)
-            .Select(archiveObject => new WorkItem(
-                archiveObject.ArchiveObjectId,
-                archiveObject.TenantId))
+            SELECT archive_object_id, tenant_id
+            FROM claimed
+            """)
             .ToArrayAsync(cancellationToken);
+
+        return workItems
+            .OrderBy(workItem => workItem.ArchiveObjectId)
+            .ToArray();
     }
 
     private async Task ProcessOneAsync(
