@@ -8,6 +8,16 @@
       "initial-version": "0.1.0",
       "bump-minor-pre-major": true,
       "version-file": "version.txt",
+      "extra-files": [
+        {
+          "type": "generic",
+          "path": "deploy/helm/cirrus/Chart.yaml"
+        },
+        {
+          "type": "generic",
+          "path": "deploy/helm/cirrus/values.yaml"
+        }
+      ],
       "include-component-in-tag": false,
       "include-v-in-tag": true,
       "include-v-in-release-name": true,

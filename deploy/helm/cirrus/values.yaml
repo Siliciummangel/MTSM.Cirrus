@@ -1,6 +1,6 @@
 image:
   repositoryPrefix: ghcr.io/siliciummangel/mtsm-cirrus
-  tag: "0.1.0"
+  tag: "0.1.0" # x-release-please-version
   pullPolicy: IfNotPresent
 
 imagePullSecrets: []
