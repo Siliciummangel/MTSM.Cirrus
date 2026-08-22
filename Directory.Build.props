@@ -1,0 +1,10 @@
+<Project>
+  <PropertyGroup>
+    <CirrusVersion>$([System.IO.File]::ReadAllText('$(MSBuildThisFileDirectory)version.txt').Trim())</CirrusVersion>
+    <Version>$(CirrusVersion)</Version>
+    <InformationalVersion Condition="'$(SourceRevisionId)' == ''">$(CirrusVersion)</InformationalVersion>
+    <InformationalVersion Condition="'$(SourceRevisionId)' != ''">$(CirrusVersion)+$(SourceRevisionId)</InformationalVersion>
+    <RepositoryUrl>https://github.com/Siliciummangel/MTSM.Cirrus</RepositoryUrl>
+    <ContinuousIntegrationBuild Condition="'$(CI)' == 'true'">true</ContinuousIntegrationBuild>
+  </PropertyGroup>
+</Project>

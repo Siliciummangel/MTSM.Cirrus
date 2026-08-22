@@ -55,6 +55,8 @@ services:
     build:
       context: .
       dockerfile: MTSM.Cirrus.Migration/Dockerfile
+      args:
+        VERSION: ${CIRRUS_VERSION:-0.0.0-local}
     image: mtsm-cirrus-migrate:local
     environment:
       <<: *cirrus-environment
@@ -68,6 +70,8 @@ services:
     build:
       context: .
       dockerfile: MTSM.Cirrus.API/Dockerfile
+      args:
+        VERSION: ${CIRRUS_VERSION:-0.0.0-local}
     image: mtsm-cirrus-api:local
     environment:
       <<: *cirrus-environment
@@ -92,6 +96,8 @@ services:
     build:
       context: .
       dockerfile: MTSM.Cirrus.Worker/Dockerfile
+      args:
+        VERSION: ${CIRRUS_VERSION:-0.0.0-local}
     image: mtsm-cirrus-worker:local
     environment:
       <<: *cirrus-environment
@@ -125,6 +131,8 @@ services:
     build:
       context: .
       dockerfile: MTSM.Cirrus.Admin/Dockerfile
+      args:
+        VERSION: ${CIRRUS_VERSION:-0.0.0-local}
     image: mtsm-cirrus-admin:local
     environment:
       <<: *cirrus-environment

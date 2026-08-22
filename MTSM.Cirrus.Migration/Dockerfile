@@ -14,9 +14,19 @@ RUN dotnet build "./MTSM.Cirrus.Migration.csproj" -c $BUILD_CONFIGURATION -o /ap
 
 FROM build AS publish
 ARG BUILD_CONFIGURATION=Release
-RUN dotnet publish "./MTSM.Cirrus.Migration.csproj" -c $BUILD_CONFIGURATION -o /app/publish /p:UseAppHost=false --no-restore
+ARG VERSION
+ARG VCS_REF=unknown
+RUN test -n "$VERSION" && dotnet publish "./MTSM.Cirrus.Migration.csproj" -c $BUILD_CONFIGURATION -o /app/publish /p:UseAppHost=false /p:Version=$VERSION /p:SourceRevisionId=$VCS_REF --no-restore
 
 FROM base AS final
+ARG VERSION
+ARG VCS_REF=unknown
 WORKDIR /app
 COPY --from=publish /app/publish .
+LABEL org.opencontainers.image.title="MTSM Cirrus Migration" \
+      org.opencontainers.image.description="Controlled database migration runner for MTSM Cirrus" \
+      org.opencontainers.image.source="https://github.com/Siliciummangel/MTSM.Cirrus" \
+      org.opencontainers.image.revision="$VCS_REF" \
+      org.opencontainers.image.version="$VERSION" \
+      org.opencontainers.image.licenses="MIT"
 ENTRYPOINT ["dotnet", "MTSM.Cirrus.Migration.dll"]

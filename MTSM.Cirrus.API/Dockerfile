@@ -16,9 +16,19 @@ RUN dotnet build "./MTSM.Cirrus.API.csproj" -c $BUILD_CONFIGURATION -o /app/buil
 
 FROM build AS publish
 ARG BUILD_CONFIGURATION=Release
-RUN dotnet publish "./MTSM.Cirrus.API.csproj" -c $BUILD_CONFIGURATION -o /app/publish /p:UseAppHost=false --no-restore
+ARG VERSION
+ARG VCS_REF=unknown
+RUN test -n "$VERSION" && dotnet publish "./MTSM.Cirrus.API.csproj" -c $BUILD_CONFIGURATION -o /app/publish /p:UseAppHost=false /p:Version=$VERSION /p:SourceRevisionId=$VCS_REF --no-restore
 
 FROM base AS final
+ARG VERSION
+ARG VCS_REF=unknown
 WORKDIR /app
 COPY --from=publish /app/publish .
+LABEL org.opencontainers.image.title="MTSM Cirrus API" \
+      org.opencontainers.image.description="HTTP API for MTSM Cirrus archival services" \
+      org.opencontainers.image.source="https://github.com/Siliciummangel/MTSM.Cirrus" \
+      org.opencontainers.image.revision="$VCS_REF" \
+      org.opencontainers.image.version="$VERSION" \
+      org.opencontainers.image.licenses="MIT"
 ENTRYPOINT ["dotnet", "MTSM.Cirrus.API.dll"]

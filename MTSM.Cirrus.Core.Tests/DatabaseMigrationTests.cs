@@ -11,8 +11,8 @@ namespace MTSM.Cirrus.Core.Tests;
 public sealed class DatabaseMigrationTests(PostgresFixture fixture)
     : IAsyncLifetime
 {
-    // Database schema shipped with Cirrus 0.1.0.
-    // Update only when the supported upgrade baseline changes.
+    // Historical pre-release schema used to verify data-preserving upgrades.
+    // After v0.1.0, update this when the supported upgrade baseline changes.
     private const string PreviousDatabaseVersion =
         "20260725225040_AddArchiveDeletionLifecycle";
 

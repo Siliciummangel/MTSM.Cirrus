@@ -11,8 +11,7 @@ It stores file content in an S3-compatible object storage system and persists se
 
 Cirrus is designed as an infrastructure component for application-generated files and raw business data. It is intentionally not a document management system.
 
-> **Project status:** `0.2.0` in development / pre-release
-> **Completed milestone:** MVP feature set (`0.1.0`)
+> **Project status:** `0.1.0` in development / pre-release
 
 ---
 
@@ -71,6 +70,7 @@ Cirrus is designed as an infrastructure component for application-generated file
   - [Database migrations](#database-migrations)
 - [Terminology](#terminology)
 - [Versioning](#versioning)
+- [Release process](docs/releases.md)
 - [Roadmap](#roadmap)
 - [License](#license)
 
@@ -2258,10 +2258,11 @@ Cirrus follows Semantic Versioning:
 MAJOR.MINOR.PATCH
 ```
 
-Example:
+The current version is stored centrally in `version.txt`. Application releases
+use Git tags with a `v` prefix. Example:
 
 ```text
-0.2.0
+v0.1.0
 ```
 
 Meaning:
@@ -2280,22 +2281,9 @@ Before version `1.0.0`:
 - Backward compatibility is not guaranteed.
 - Release notes should explicitly describe breaking changes.
 
-The MVP feature milestone is:
-
-```text
-0.1.0
-```
-
-Potential later versions:
-
-```text
-0.1.1  Bug fixes for the initial MVP
-0.2.0  Scheduled worker integrity verification (in development)
-0.3.0  Additional operational features
-1.0.0  Stable supported contract
-```
-
-The application version should be defined centrally for all projects.
+Container tags, Release Please, release notes, SBOMs, attestations, and the
+complete publication procedure are documented in
+[Cirrus releases](docs/releases.md).
 
 ---
 
@@ -2323,8 +2311,6 @@ The MIT License permits use, copying, modification, distribution, sublicensing a
 
 Cirrus is under active development.
 
-The MVP feature set was completed as the `0.1.0` milestone. Current development
-targets `0.2.0`, beginning with distributed scheduled integrity verification in
-the worker runtime.
+The first automated public release will be `v0.1.0`.
 
 Feedback, issue reports and contributions will be welcome once the public contribution process is defined.

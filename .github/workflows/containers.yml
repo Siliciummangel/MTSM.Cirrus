@@ -1,0 +1,347 @@
+name: Container CI
+
+on:
+  pull_request:
+    branches: ["main"]
+  push:
+    branches: ["main"]
+  workflow_call:
+    inputs:
+      release-version:
+        description: SemVer without the v prefix
+        required: true
+        type: string
+      release-sha:
+        description: Commit to build for the release
+        required: true
+        type: string
+
+concurrency:
+  group: containers-${{ github.event_name }}-${{ inputs.release-version || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+env:
+  REGISTRY: ghcr.io
+  IMAGE_PREFIX: ghcr.io/siliciummangel/mtsm-cirrus
+
+jobs:
+  build-scan-and-test:
+    name: ${{ matrix.service }} image
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+      id-token: write
+      attestations: write
+      artifact-metadata: write
+    services:
+      postgres:
+        image: postgres:18
+        env:
+          POSTGRES_DB: cirrus_container_test
+          POSTGRES_USER: cirrus
+          POSTGRES_PASSWORD: cirrus-container-password
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U cirrus -d cirrus_container_test"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 20
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - service: api
+            dockerfile: MTSM.Cirrus.API/Dockerfile
+          - service: worker
+            dockerfile: MTSM.Cirrus.Worker/Dockerfile
+          - service: migrate
+            dockerfile: MTSM.Cirrus.Migration/Dockerfile
+          - service: admin
+            dockerfile: MTSM.Cirrus.Admin/Dockerfile
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+        with:
+          ref: ${{ inputs.release-sha || github.sha }}
+
+      - name: Resolve build metadata
+        id: metadata
+        shell: bash
+        env:
+          RELEASE_VERSION: ${{ inputs.release-version }}
+          RELEASE_SHA: ${{ inputs.release-sha }}
+          SERVICE: ${{ matrix.service }}
+        run: |
+          set -euo pipefail
+
+          commit_sha="${RELEASE_SHA:-${GITHUB_SHA}}"
+          short_sha="${commit_sha:0:7}"
+          version="${RELEASE_VERSION:-$(tr -d '[:space:]' < version.txt)}"
+          image="${IMAGE_PREFIX}-${SERVICE}"
+
+          if [[ ! "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z]+(\.[0-9A-Za-z]+)*)?$ ]]; then
+            echo "Invalid Cirrus version: $version" >&2
+            exit 1
+          fi
+
+          tags=("${image}:sha-${short_sha}")
+
+          if [[ "$GITHUB_EVENT_NAME" == "pull_request" ]]; then
+            tags=("${image}:ci-${short_sha}")
+          fi
+
+          {
+            echo "tags<<EOF"
+            printf '%s\n' "${tags[@]}"
+            echo "EOF"
+            echo "commit-sha=$commit_sha"
+            echo "short-sha=$short_sha"
+            echo "version=$version"
+            echo "image=$image"
+            echo "primary-tag=${tags[0]}"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to GHCR
+        if: github.event_name != 'pull_request'
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Check Dockerfile configuration
+        uses: aquasecurity/trivy-action@v0.36.0
+        with:
+          scan-type: config
+          scan-ref: ${{ matrix.dockerfile }}
+          format: table
+          exit-code: "1"
+          severity: HIGH,CRITICAL
+
+      - name: Build container image
+        id: build
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: ${{ matrix.dockerfile }}
+          platforms: linux/amd64
+          push: ${{ github.event_name != 'pull_request' }}
+          load: ${{ github.event_name == 'pull_request' }}
+          tags: ${{ steps.metadata.outputs.tags }}
+          build-args: |
+            VERSION=${{ steps.metadata.outputs.version }}
+            VCS_REF=${{ steps.metadata.outputs.commit-sha }}
+          cache-from: type=gha,scope=${{ matrix.service }}
+          cache-to: type=gha,mode=max,scope=${{ matrix.service }}
+
+      - name: Pull published image for verification
+        if: github.event_name != 'pull_request'
+        shell: bash
+        env:
+          IMAGE: ${{ steps.metadata.outputs.image }}
+          DIGEST: ${{ steps.build.outputs.digest }}
+        run: docker pull "${IMAGE}@${DIGEST}"
+
+      - name: Verify image metadata
+        shell: bash
+        env:
+          PRIMARY_TAG: ${{ steps.metadata.outputs.primary-tag }}
+          IMAGE: ${{ steps.metadata.outputs.image }}
+          DIGEST: ${{ steps.build.outputs.digest }}
+          EXPECTED_VERSION: ${{ steps.metadata.outputs.version }}
+          EXPECTED_REVISION: ${{ steps.metadata.outputs.commit-sha }}
+        run: |
+          set -euo pipefail
+
+          image_ref="$PRIMARY_TAG"
+          if [[ "$GITHUB_EVENT_NAME" != "pull_request" ]]; then
+            image_ref="${IMAGE}@${DIGEST}"
+          fi
+
+          actual_version="$(docker inspect "$image_ref" --format '{{ index .Config.Labels "org.opencontainers.image.version" }}')"
+          actual_revision="$(docker inspect "$image_ref" --format '{{ index .Config.Labels "org.opencontainers.image.revision" }}')"
+
+          test "$actual_version" = "$EXPECTED_VERSION"
+          test "$actual_revision" = "$EXPECTED_REVISION"
+
+      - name: Smoke-test container behavior
+        shell: bash
+        env:
+          SERVICE: ${{ matrix.service }}
+          PRIMARY_TAG: ${{ steps.metadata.outputs.primary-tag }}
+          IMAGE: ${{ steps.metadata.outputs.image }}
+          DIGEST: ${{ steps.build.outputs.digest }}
+        run: |
+          set -euo pipefail
+
+          image_ref="$PRIMARY_TAG"
+          if [[ "$GITHUB_EVENT_NAME" != "pull_request" ]]; then
+            image_ref="${IMAGE}@${DIGEST}"
+          fi
+
+          database='Host=127.0.0.1;Port=5432;Database=cirrus_container_test;Username=cirrus;Password=cirrus-container-password;GSS Encryption Mode=Disable'
+
+          case "$SERVICE" in
+            api)
+              docker run --detach --rm --name cirrus-api-smoke --network host \
+                --env ASPNETCORE_HTTP_PORTS=18080 \
+                --env "ConnectionStrings__ArchiveDatabase=$database" \
+                --env S3__ServiceUrl=http://127.0.0.1:8333 \
+                --env S3__AccessKey=smoke-access \
+                --env S3__SecretKey=smoke-secret \
+                --env S3__Region=us-east-1 \
+                "$image_ref"
+
+              trap 'docker logs cirrus-api-smoke || true; docker stop cirrus-api-smoke || true' EXIT
+              for _ in {1..30}; do
+                if curl --fail --silent http://127.0.0.1:18080/health/live >/dev/null; then
+                  exit 0
+                fi
+                sleep 1
+              done
+              exit 1
+              ;;
+            worker)
+              docker run --detach --rm --name cirrus-worker-smoke --network host \
+                --env "ConnectionStrings__ArchiveDatabase=$database" \
+                --env S3__ServiceUrl=http://127.0.0.1:8333 \
+                --env S3__AccessKey=smoke-access \
+                --env S3__SecretKey=smoke-secret \
+                --env S3__Region=us-east-1 \
+                --env IntegrityChecks__Enabled=false \
+                --env Purge__Enabled=false \
+                "$image_ref"
+
+              trap 'docker logs cirrus-worker-smoke || true; docker stop cirrus-worker-smoke || true' EXIT
+              sleep 5
+              test "$(docker inspect cirrus-worker-smoke --format '{{.State.Running}}')" = "true"
+              ;;
+            migrate)
+              docker run --rm --network host \
+                --env "ConnectionStrings__ArchiveDatabase=$database" \
+                "$image_ref"
+              docker run --rm --network host \
+                --env "ConnectionStrings__ArchiveDatabase=$database" \
+                "$image_ref"
+
+              if [[ "$GITHUB_EVENT_NAME" == "workflow_call" ]] \
+                && docker manifest inspect "${IMAGE_PREFIX}-migrate:stable" >/dev/null 2>&1; then
+                upgrade_database='Host=127.0.0.1;Port=5432;Database=cirrus_upgrade_test;Username=cirrus;Password=cirrus-container-password;GSS Encryption Mode=Disable'
+
+                docker run --rm --network host \
+                  --env PGPASSWORD=cirrus-container-password \
+                  postgres:18 \
+                  psql --host 127.0.0.1 --username cirrus \
+                    --dbname cirrus_container_test \
+                    --command 'CREATE DATABASE cirrus_upgrade_test'
+
+                docker run --rm --network host \
+                  --env "ConnectionStrings__ArchiveDatabase=$upgrade_database" \
+                  "${IMAGE_PREFIX}-migrate:stable"
+                docker run --rm --network host \
+                  --env "ConnectionStrings__ArchiveDatabase=$upgrade_database" \
+                  "$image_ref"
+              fi
+              ;;
+            admin)
+              docker run --rm "$image_ref" --help
+              ;;
+          esac
+
+      - name: Scan fixable high and critical vulnerabilities
+        uses: aquasecurity/trivy-action@v0.36.0
+        with:
+          image-ref: ${{ github.event_name == 'pull_request' && steps.metadata.outputs.primary-tag || format('{0}@{1}', steps.metadata.outputs.image, steps.build.outputs.digest) }}
+          format: table
+          exit-code: "1"
+          ignore-unfixed: true
+          vuln-type: os,library
+          severity: HIGH,CRITICAL
+
+      - name: Generate SPDX SBOM
+        if: github.event_name != 'pull_request'
+        uses: anchore/sbom-action@v0.24.0
+        with:
+          image: ${{ format('{0}@{1}', steps.metadata.outputs.image, steps.build.outputs.digest) }}
+          format: spdx-json
+          output-file: ${{ format('sbom-{0}.spdx.json', matrix.service) }}
+          artifact-name: ${{ format('cirrus-{0}-{1}.spdx.json', matrix.service, steps.metadata.outputs.short-sha) }}
+          upload-artifact: false
+          upload-release-assets: false
+
+      - name: Attest build provenance
+        if: github.event_name != 'pull_request'
+        uses: actions/attest@v4
+        with:
+          subject-name: ${{ steps.metadata.outputs.image }}
+          subject-digest: ${{ steps.build.outputs.digest }}
+          push-to-registry: true
+          create-storage-record: false
+
+      - name: Attest SBOM
+        if: github.event_name != 'pull_request'
+        uses: actions/attest@v4
+        with:
+          subject-name: ${{ steps.metadata.outputs.image }}
+          subject-digest: ${{ steps.build.outputs.digest }}
+          sbom-path: ${{ format('sbom-{0}.spdx.json', matrix.service) }}
+          push-to-registry: true
+          create-storage-record: false
+
+      - name: Verify published attestations
+        if: github.event_name != 'pull_request'
+        shell: bash
+        env:
+          IMAGE: ${{ steps.metadata.outputs.image }}
+          DIGEST: ${{ steps.build.outputs.digest }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+
+          for _ in {1..5}; do
+            if gh attestation verify "oci://${IMAGE}@${DIGEST}" \
+              --repo "$GITHUB_REPOSITORY"; then
+              exit 0
+            fi
+            sleep 5
+          done
+
+          exit 1
+
+  promote-main:
+    name: Promote tested main images
+    if: github.event_name == 'push'
+    needs: build-scan-and-test
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Promote SHA images to latest
+        shell: bash
+        run: |
+          set -euo pipefail
+          short_sha="${GITHUB_SHA:0:7}"
+
+          for service in api worker migrate admin; do
+            image="${IMAGE_PREFIX}-${service}"
+            docker buildx imagetools create \
+              --tag "${image}:latest" \
+              "${image}:sha-${short_sha}"
+          done
