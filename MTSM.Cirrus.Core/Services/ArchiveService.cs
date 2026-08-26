@@ -89,7 +89,7 @@ public sealed class ArchiveService : IArchiveService
                 exception);
         }
 
-        string objectKey = CreateObjectKey(
+        string stagingObjectKey = CreateStagingObjectKey(
             tenant,
             fileType,
             now);
@@ -97,7 +97,8 @@ public sealed class ArchiveService : IArchiveService
         var archiveObject = new ArchiveObject
         {
             TenantId = tenant.TenantId,
-            ObjectKey = objectKey,
+            ObjectKey = null,
+            StagingObjectKey = stagingObjectKey,
             BucketName = tenant.BucketName,
 
             FileType = fileType,
@@ -166,7 +167,7 @@ public sealed class ArchiveService : IArchiveService
             ObjectStorageWriteResult storageResult =
                 await _objectStorage.WriteAsync(
                     archiveObject.BucketName,
-                    archiveObject.ObjectKey,
+                    GetCurrentStorageObjectKey(archiveObject),
                     hashingStream,
                     archiveObject.MimeType,
                     archiveObject.EncryptionKeyId,
@@ -226,7 +227,7 @@ public sealed class ArchiveService : IArchiveService
                     "at {BucketName}/{ObjectKey}.",
                     archiveObject.ArchiveObjectId,
                     archiveObject.BucketName,
-                    archiveObject.ObjectKey);
+                    archiveObject.StagingObjectKey);
             }
             else
             {
@@ -272,7 +273,7 @@ public sealed class ArchiveService : IArchiveService
         {
             content = await _objectStorage.OpenReadAsync(
                 archiveObject.BucketName,
-                archiveObject.ObjectKey,
+                GetCurrentStorageObjectKey(archiveObject),
                 cancellationToken);
         }
         catch (OperationCanceledException)
@@ -287,7 +288,7 @@ public sealed class ArchiveService : IArchiveService
                 "at {BucketName}/{ObjectKey} with error type {StorageErrorType}.",
                 archiveObjectId,
                 archiveObject.BucketName,
-                archiveObject.ObjectKey,
+                GetCurrentStorageObjectKey(archiveObject),
                 exception.GetType().Name);
 
             throw new ArchiveException(
@@ -372,7 +373,7 @@ public sealed class ArchiveService : IArchiveService
             .Select(x => new ArchiveMetadataResult(
                 x.ArchiveObjectId,
                 x.TenantId,
-                x.ObjectKey,
+                x.StagingObjectKey ?? x.ObjectKey!,
                 x.BucketName,
                 x.FileType,
                 x.MimeType,
@@ -519,7 +520,7 @@ public sealed class ArchiveService : IArchiveService
         {
             content = await _objectStorage.OpenReadAsync(
                 archiveObject.BucketName,
-                archiveObject.ObjectKey,
+                GetCurrentStorageObjectKey(archiveObject),
                 cancellationToken);
         }
         catch (OperationCanceledException)
@@ -534,7 +535,7 @@ public sealed class ArchiveService : IArchiveService
                 "failed at {BucketName}/{ObjectKey} with error type {StorageErrorType}.",
                 archiveObjectId,
                 archiveObject.BucketName,
-                archiveObject.ObjectKey,
+                GetCurrentStorageObjectKey(archiveObject),
                 exception.GetType().Name);
 
             throw new ArchiveException(
@@ -599,7 +600,7 @@ public sealed class ArchiveService : IArchiveService
                     "failed at {BucketName}/{ObjectKey} with error type {StorageErrorType}.",
                     archiveObjectId,
                     archiveObject.BucketName,
-                    archiveObject.ObjectKey,
+                    GetCurrentStorageObjectKey(archiveObject),
                     exception.GetType().Name);
 
                 throw new ArchiveException(
@@ -1236,7 +1237,7 @@ public sealed class ArchiveService : IArchiveService
                 }));
     }
 
-    private static string CreateObjectKey(
+    private static string CreateStagingObjectKey(
         Tenant tenant,
         string fileTypeValue,
         DateTimeOffset timestamp)
@@ -1254,12 +1255,19 @@ public sealed class ArchiveService : IArchiveService
         return string.Join(
             '/',
             prefix,
+            "staging",
             fileType,
             timestamp.UtcDateTime.ToString("yyyy"),
             timestamp.UtcDateTime.ToString("MM"),
             timestamp.UtcDateTime.ToString("dd"),
             objectId);
     }
+
+    private static string GetCurrentStorageObjectKey(ArchiveObject archiveObject) =>
+        archiveObject.StagingObjectKey
+        ?? archiveObject.ObjectKey
+        ?? throw new ArchiveException(
+            $"Archive object {archiveObject.ArchiveObjectId} has no readable storage location.");
 
     private async Task ValidateBusinessReferenceTypesAsync(
         IReadOnlyCollection<ArchiveBusinessReferenceInput> references,

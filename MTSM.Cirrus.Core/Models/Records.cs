@@ -21,7 +21,7 @@ public sealed record ArchiveBusinessReferenceInput(
 public sealed record ArchiveFileResult(
     long ArchiveObjectId,
     long TenantId,
-    string ObjectKey,
+    string? ObjectKey,
     string Sha256Hash,
     long SizeBytes,
     DateTimeOffset ArchivedAt);

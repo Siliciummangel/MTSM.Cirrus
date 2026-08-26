@@ -14,7 +14,6 @@ public static class ArchiveResponseMapper
         return new ArchiveFileResponse(
             result.ArchiveObjectId,
             result.TenantId,
-            result.ObjectKey,
             result.Sha256Hash,
             result.SizeBytes,
             result.ArchivedAt);

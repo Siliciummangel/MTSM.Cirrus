@@ -124,6 +124,9 @@ public sealed class ArchiveServiceIntegrationTests(PostgresFixture fixture)
         Assert.Equal(content.Length, persisted.SizeBytes);
         Assert.Equal(Sha256(content), persisted.Sha256Hash);
         Assert.Equal("version-1", persisted.StorageVersionId);
+        Assert.Null(persisted.ObjectKey);
+        Assert.NotNull(persisted.StagingObjectKey);
+        Assert.Contains("/staging/", persisted.StagingObjectKey);
         Assert.Equal("DOC-42", Assert.Single(persisted.BusinessReferences).ReferenceValue);
         Assert.Equal(1, Assert.Single(persisted.BusinessReferences).TenantId);
         Assert.Equal(
@@ -131,7 +134,7 @@ public sealed class ArchiveServiceIntegrationTests(PostgresFixture fixture)
             persisted.Events.OrderBy(item => item.EventTimestamp).Select(item => item.EventType));
         Assert.All(persisted.Events, archiveEvent =>
             Assert.Equal(1, archiveEvent.TenantId));
-        Assert.True(await storage.ExistsAsync(persisted.BucketName, persisted.ObjectKey));
+        Assert.True(await storage.ExistsAsync(persisted.BucketName, persisted.StagingObjectKey));
 
         ArchiveMetadataResult? metadata = await service.GetMetadataAsync(1, result.ArchiveObjectId);
         Assert.NotNull(metadata);
@@ -218,7 +221,7 @@ public sealed class ArchiveServiceIntegrationTests(PostgresFixture fixture)
 
         Assert.Equal(ArchiveStatus.Pending, persisted.ArchiveStatus);
         Assert.Null(persisted.Sha256Hash);
-        Assert.True(await storage.ExistsAsync(persisted.BucketName, persisted.ObjectKey));
+        Assert.True(await storage.ExistsAsync(persisted.BucketName, persisted.StagingObjectKey!));
     }
 
     [PostgresFact]
@@ -275,7 +278,10 @@ public sealed class ArchiveServiceIntegrationTests(PostgresFixture fixture)
         ArchiveFileResult archived = await service.ArchiveAsync(CreateRequest("original"u8.ToArray()));
         ArchiveObject location = await dbContext.ArchiveObjects
             .SingleAsync(item => item.ArchiveObjectId == archived.ArchiveObjectId);
-        storage.Replace(location.BucketName, location.ObjectKey, "tampered"u8.ToArray());
+        storage.Replace(
+            location.BucketName,
+            location.StagingObjectKey ?? location.ObjectKey!,
+            "tampered"u8.ToArray());
 
         ArchiveIntegrityResult result = await service.VerifyIntegrityAsync(
             1,

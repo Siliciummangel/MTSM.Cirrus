@@ -51,8 +51,10 @@ public sealed class ArchiveObjectConfiguration
             .IsRequired();
 
         builder.Property(x => x.ObjectKey)
-            .HasMaxLength(1024)
-            .IsRequired();
+            .HasMaxLength(1024);
+
+        builder.Property(x => x.StagingObjectKey)
+            .HasMaxLength(1024);
 
         builder.Property(x => x.BucketName)
             .HasMaxLength(255)
@@ -141,6 +143,14 @@ public sealed class ArchiveObjectConfiguration
             x.TenantId,
             x.BucketName,
             x.ObjectKey
+        })
+        .IsUnique();
+
+        builder.HasIndex(x => new
+        {
+            x.TenantId,
+            x.BucketName,
+            x.StagingObjectKey
         })
         .IsUnique();
 

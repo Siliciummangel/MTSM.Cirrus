@@ -170,7 +170,10 @@ public sealed class PurgeProcessor(
 
             ObjectStorageDeleteOutcome outcome = await storage.DeleteAsync(
                 item.BucketName,
-                item.ObjectKey,
+                item.StagingObjectKey
+                    ?? item.ObjectKey
+                    ?? throw new InvalidOperationException(
+                        $"Archive object {item.ArchiveObjectId} has no storage object key."),
                 item.StorageVersionId,
                 cancellationToken);
 

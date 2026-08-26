@@ -232,13 +232,13 @@ public sealed class PurgeProcessorIntegrationTests(PostgresFixture fixture) : IA
     {
         ArchiveObject item = await GetAsync(id);
         await using var stream = new MemoryStream("payload"u8.ToArray());
-        await context.Storage.WriteAsync(item.BucketName, item.ObjectKey, stream, null);
+        await context.Storage.WriteAsync(item.BucketName, item.ObjectKey!, stream, null);
     }
 
     private async Task<bool> StorageExistsAsync(PurgeWorkerTestContext context, long id)
     {
         ArchiveObject item = await GetAsync(id);
-        return await context.Storage.ExistsAsync(item.BucketName, item.ObjectKey);
+        return await context.Storage.ExistsAsync(item.BucketName, item.ObjectKey!);
     }
 
     private async Task<ArchiveObject> GetAsync(long id)

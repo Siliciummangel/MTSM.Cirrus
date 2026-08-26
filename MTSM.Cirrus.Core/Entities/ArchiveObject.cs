@@ -8,7 +8,9 @@ public sealed class ArchiveObject
 
     public long TenantId { get; set; }
 
-    public required string ObjectKey { get; set; }
+    public string? ObjectKey { get; set; }
+
+    public string? StagingObjectKey { get; set; }
 
     public required string BucketName { get; set; }
 

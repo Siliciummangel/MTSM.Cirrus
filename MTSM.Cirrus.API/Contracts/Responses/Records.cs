@@ -6,7 +6,6 @@ namespace MTSM.Cirrus.API.Contracts.Responses;
 public sealed record ArchiveFileResponse(
     long ArchiveObjectId,
     long TenantId,
-    string ObjectKey,
     string Sha256Hash,
     long SizeBytes,
     DateTimeOffset ArchivedAt);

@@ -32,9 +32,17 @@ public sealed class ArchiveApiIntegrationTests
         Assert.Equal(
             "/api/tenants/1/archive/42/metadata",
             response.Headers.Location?.AbsolutePath);
-        ArchiveFileResponse? body =
-            await response.Content.ReadFromJsonAsync<ArchiveFileResponse>();
-        Assert.Equal(42, body?.ArchiveObjectId);
+        JsonDocument? body =
+            await response.Content.ReadFromJsonAsync<JsonDocument>();
+        Assert.NotNull(body);
+        Assert.Equal(42, body.RootElement.GetProperty("archiveObjectId").GetInt64());
+        Assert.Equal(1, body.RootElement.GetProperty("tenantId").GetInt64());
+        Assert.Equal(
+            new string('a', 64),
+            body.RootElement.GetProperty("sha256Hash").GetString());
+        Assert.Equal(7, body.RootElement.GetProperty("sizeBytes").GetInt64());
+        Assert.True(body.RootElement.TryGetProperty("archivedAt", out _));
+        Assert.False(body.RootElement.TryGetProperty("objectKey", out _));
         Assert.Equal("payload.txt", factory.ArchiveService.LastArchiveRequest?.OriginalFilename);
         Assert.Equal("source-a", factory.ArchiveService.LastArchiveRequest?.SourceSystem);
     }
