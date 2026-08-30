@@ -1,4 +1,5 @@
 using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore.Storage;
 using Microsoft.Extensions.Options;
 using MTSM.Cirrus.Core.Abstractions;
 using MTSM.Cirrus.Core.Data;
@@ -233,60 +234,65 @@ public sealed class PurgeProcessor(
     {
         await using AsyncServiceScope scope = scopeFactory.CreateAsyncScope();
         CirrusDbContext dbContext = scope.ServiceProvider.GetRequiredService<CirrusDbContext>();
-        await using var transaction = await dbContext.Database.BeginTransactionAsync(cancellationToken);
+        IExecutionStrategy strategy = dbContext.Database.CreateExecutionStrategy();
+        await strategy.ExecuteAsync(async () =>
+        {
+            dbContext.ChangeTracker.Clear();
+            await using var transaction = await dbContext.Database.BeginTransactionAsync(cancellationToken);
 
-        ArchiveObject? item = await dbContext.ArchiveObjects
-            .FromSqlInterpolated($"""
+            ArchiveObject? item = await dbContext.ArchiveObjects
+                .FromSqlInterpolated($"""
                 SELECT * FROM cirrus.archive_object
                 WHERE archive_object_id = {archiveObjectId}
                   AND archive_status = 'DeletionRequested'
                   AND purge_lease_owner = {leaseOwner}
                 FOR UPDATE
                 """)
-            .Include(candidate => candidate.Errors)
-            .SingleOrDefaultAsync(cancellationToken);
+                .Include(candidate => candidate.Errors)
+                .SingleOrDefaultAsync(cancellationToken);
 
-        if (item is null)
-        {
-            await transaction.RollbackAsync(cancellationToken);
-            return;
-        }
-
-        DateTimeOffset purgedAt = timeProvider.GetUtcNow();
-        item.ArchiveStatus = ArchiveStatus.Purged;
-        item.PurgedAt = purgedAt;
-        item.PurgeLeaseOwner = null;
-        item.PurgeLeaseUntil = null;
-        item.NextIntegrityCheckAt = null;
-        item.IntegrityCheckLeaseOwner = null;
-        item.IntegrityCheckLeaseUntil = null;
-        // The archive is the reachability root. Shared chunks remain alive through
-        // other manifests; pack maintenance removes only content that lost its last root.
-        item.ContentManifestId = null;
-
-        foreach (ArchiveErrorQueueItem error in item.Errors.Where(error =>
-                     error.ErrorType == PurgeErrorType && !error.Resolved))
-        {
-            error.Resolved = true;
-            error.ResolvedAt = purgedAt;
-            error.NextRetryAt = null;
-        }
-
-        item.Events.Add(new ArchiveEvent
-        {
-            TenantId = item.TenantId,
-            EventType = ArchiveEventType.Purged,
-            EventTimestamp = purgedAt,
-            Actor = $"archive-worker/{workerInstanceId}",
-            DetailsJson = JsonDocument.Parse(JsonSerializer.Serialize(new
+            if (item is null)
             {
-                storageOutcome = outcome.ToString(),
-                objectWasAlreadyMissing = outcome == ObjectStorageDeleteOutcome.NotFound
-            }))
-        });
+                await transaction.RollbackAsync(cancellationToken);
+                return;
+            }
 
-        await dbContext.SaveChangesAsync(cancellationToken);
-        await transaction.CommitAsync(cancellationToken);
+            DateTimeOffset purgedAt = timeProvider.GetUtcNow();
+            item.ArchiveStatus = ArchiveStatus.Purged;
+            item.PurgedAt = purgedAt;
+            item.PurgeLeaseOwner = null;
+            item.PurgeLeaseUntil = null;
+            item.NextIntegrityCheckAt = null;
+            item.IntegrityCheckLeaseOwner = null;
+            item.IntegrityCheckLeaseUntil = null;
+            // The archive is the reachability root. Shared chunks remain alive through
+            // other manifests; pack maintenance removes only content that lost its last root.
+            item.ContentManifestId = null;
+
+            foreach (ArchiveErrorQueueItem error in item.Errors.Where(error =>
+                         error.ErrorType == PurgeErrorType && !error.Resolved))
+            {
+                error.Resolved = true;
+                error.ResolvedAt = purgedAt;
+                error.NextRetryAt = null;
+            }
+
+            item.Events.Add(new ArchiveEvent
+            {
+                TenantId = item.TenantId,
+                EventType = ArchiveEventType.Purged,
+                EventTimestamp = purgedAt,
+                Actor = $"archive-worker/{workerInstanceId}",
+                DetailsJson = JsonDocument.Parse(JsonSerializer.Serialize(new
+                {
+                    storageOutcome = outcome.ToString(),
+                    objectWasAlreadyMissing = outcome == ObjectStorageDeleteOutcome.NotFound
+                }))
+            });
+
+            await dbContext.SaveChangesAsync(cancellationToken);
+            await transaction.CommitAsync(cancellationToken);
+        });
     }
 
     private async Task ScheduleRetryAsync(

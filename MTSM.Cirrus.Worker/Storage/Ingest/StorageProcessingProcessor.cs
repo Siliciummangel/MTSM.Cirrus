@@ -1,4 +1,5 @@
 using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore.Storage;
 using Microsoft.Extensions.Options;
 using MTSM.Cirrus.Core.Abstractions;
 using MTSM.Cirrus.Core.Data;
@@ -248,48 +249,53 @@ public sealed class StorageProcessingProcessor(
                 $"Staging verification failed for archive object {archiveObjectId}.");
         }
 
-        DateTimeOffset verifiedAt = timeProvider.GetUtcNow();
-        await using var transaction =
-            await dbContext.Database.BeginTransactionAsync(cancellationToken);
+        IExecutionStrategy strategy = dbContext.Database.CreateExecutionStrategy();
+        await strategy.ExecuteAsync(async () =>
+        {
+            dbContext.ChangeTracker.Clear();
+            DateTimeOffset verifiedAt = timeProvider.GetUtcNow();
+            await using var transaction =
+                await dbContext.Database.BeginTransactionAsync(cancellationToken);
 
-        ArchiveObject? ownedItem = await dbContext.ArchiveObjects
-            .Include(candidate => candidate.Errors)
-            .SingleOrDefaultAsync(candidate =>
+            ArchiveObject? ownedItem = await dbContext.ArchiveObjects
+                .Include(candidate => candidate.Errors)
+                .SingleOrDefaultAsync(candidate =>
                 candidate.ArchiveObjectId == archiveObjectId
                 && candidate.StorageProcessingStatus ==
                     StorageProcessingStatus.Processing
                 && candidate.StorageProcessingLeaseOwner == leaseOwner,
                 cancellationToken);
 
-        if (ownedItem is null)
-        {
-            await transaction.RollbackAsync(cancellationToken);
-            logger.LogWarning(
-                "Storage verification for archive object {ArchiveObjectId} " +
-                "finished after its lease was lost.",
-                archiveObjectId);
-            return;
-        }
+            if (ownedItem is null)
+            {
+                await transaction.RollbackAsync(cancellationToken);
+                logger.LogWarning(
+                    "Storage verification for archive object {ArchiveObjectId} " +
+                    "finished after its lease was lost.",
+                    archiveObjectId);
+                return;
+            }
 
-        ownedItem.StorageProcessingStatus = StorageProcessingStatus.Ready;
-        ownedItem.StorageProcessingVerifiedAt = verifiedAt;
-        ownedItem.StorageProcessingLeaseOwner = null;
-        ownedItem.StorageProcessingLeaseUntil = null;
-        ownedItem.StorageProcessingNextAttemptAt = null;
-        ownedItem.StorageProcessingErrorCode = null;
-        ownedItem.StorageProcessingErrorMessage = null;
+            ownedItem.StorageProcessingStatus = StorageProcessingStatus.Ready;
+            ownedItem.StorageProcessingVerifiedAt = verifiedAt;
+            ownedItem.StorageProcessingLeaseOwner = null;
+            ownedItem.StorageProcessingLeaseUntil = null;
+            ownedItem.StorageProcessingNextAttemptAt = null;
+            ownedItem.StorageProcessingErrorCode = null;
+            ownedItem.StorageProcessingErrorMessage = null;
 
-        ResolveErrors(ownedItem, verifiedAt);
-        ownedItem.Events.Add(new ArchiveEvent
-        {
-            TenantId = ownedItem.TenantId,
-            EventType = ArchiveEventType.StorageProcessingVerified,
-            EventTimestamp = verifiedAt,
-            Actor = $"archive-worker/{workerInstanceId}"
+            ResolveErrors(ownedItem, verifiedAt);
+            ownedItem.Events.Add(new ArchiveEvent
+            {
+                TenantId = ownedItem.TenantId,
+                EventType = ArchiveEventType.StorageProcessingVerified,
+                EventTimestamp = verifiedAt,
+                Actor = $"archive-worker/{workerInstanceId}"
+            });
+
+            await dbContext.SaveChangesAsync(cancellationToken);
+            await transaction.CommitAsync(cancellationToken);
         });
-
-        await dbContext.SaveChangesAsync(cancellationToken);
-        await transaction.CommitAsync(cancellationToken);
     }
 
     private async Task RenewLeaseAsync(

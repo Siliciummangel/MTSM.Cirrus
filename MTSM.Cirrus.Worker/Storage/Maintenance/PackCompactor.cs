@@ -45,10 +45,20 @@ public sealed class PackCompactor(
             string key = $"{prefix}/packs/v1/{now:yyyy/MM/dd}/{Guid.NewGuid():N}";
             ObjectStorageWriteResult write = await storage.WriteAsync(oldPacks[0].BucketName, key,
                 sealedPack.Content, "application/vnd.mtsm.cirrus.pack", null, cancellationToken);
-            var pack = new StoragePack { TenantId = oldPacks[0].TenantId, BucketName = oldPacks[0].BucketName,
-                ObjectKey = key, StorageVersionId = write.VersionId ?? write.ETag, PackFormatVersion = 1,
-                HashAlgorithm = "SHA-256", PackHash = sealedPack.Sha256Hash, SizeBytes = sealedPack.Length,
-                PackStatus = PackStatus.Uploaded, CreatedAt = now, UploadedAt = now };
+            var pack = new StoragePack
+            {
+                TenantId = oldPacks[0].TenantId,
+                BucketName = oldPacks[0].BucketName,
+                ObjectKey = key,
+                StorageVersionId = write.VersionId ?? write.ETag,
+                PackFormatVersion = 1,
+                HashAlgorithm = "SHA-256",
+                PackHash = sealedPack.Sha256Hash,
+                SizeBytes = sealedPack.Length,
+                PackStatus = PackStatus.Uploaded,
+                CreatedAt = now,
+                UploadedAt = now
+            };
             db.StoragePacks.Add(pack);
             await db.SaveChangesAsync(cancellationToken);
             newPackIds.Add(pack.StoragePackId);
@@ -77,27 +87,38 @@ public sealed class PackCompactor(
         List<MovedPackLocation> moved, string lease, CancellationToken cancellationToken)
     {
         db.ChangeTracker.Clear();
-        await using IDbContextTransaction transaction = await db.Database.BeginTransactionAsync(cancellationToken);
-        int owned = await db.StoragePacks.CountAsync(x => oldIds.Contains(x.StoragePackId)
-            && x.PackStatus == PackStatus.Committed && x.MaintenanceLeaseOwner == lease, cancellationToken);
-        if (owned != oldIds.Length) throw new InvalidOperationException("Pack-maintenance lease was lost.");
-        foreach (MovedPackLocation move in moved)
-            db.StorageLocations.Add(new StorageLocation { ContentChunkId = move.Source.ContentChunkId,
-                StoragePackId = move.NewPackId, PackOffset = move.Entry.Offset,
-                StoredLength = move.Entry.StoredLength, RawLength = move.Source.RawLength,
-                CompressionAlgorithm = move.Source.CompressionAlgorithm,
-                CompressionVersion = move.Source.CompressionVersion, StorageFormatVersion = move.Source.StorageFormatVersion,
-                CreatedAt = timeProvider.GetUtcNow() });
-        await db.StorageLocations.Where(x => oldIds.Contains(x.StoragePackId)).ExecuteDeleteAsync(cancellationToken);
-        await db.StoragePacks.Where(x => newPackIds.Contains(x.StoragePackId)).ExecuteUpdateAsync(s => s
-            .SetProperty(x => x.PackStatus, PackStatus.Committed)
-            .SetProperty(x => x.CommittedAt, timeProvider.GetUtcNow()), cancellationToken);
-        await db.StoragePacks.Where(x => oldIds.Contains(x.StoragePackId)).ExecuteUpdateAsync(s => s
-            .SetProperty(x => x.PackStatus, PackStatus.GarbagePending)
-            .SetProperty(x => x.MaintenanceLeaseOwner, (string?)null)
-            .SetProperty(x => x.MaintenanceLeaseUntil, (DateTimeOffset?)null), cancellationToken);
-        await db.SaveChangesAsync(cancellationToken);
-        await transaction.CommitAsync(cancellationToken);
+        IExecutionStrategy strategy = db.Database.CreateExecutionStrategy();
+        await strategy.ExecuteAsync(async () =>
+        {
+            db.ChangeTracker.Clear();
+            await using IDbContextTransaction transaction = await db.Database.BeginTransactionAsync(cancellationToken);
+            int owned = await db.StoragePacks.CountAsync(x => oldIds.Contains(x.StoragePackId)
+                && x.PackStatus == PackStatus.Committed && x.MaintenanceLeaseOwner == lease, cancellationToken);
+            if (owned != oldIds.Length) throw new InvalidOperationException("Pack-maintenance lease was lost.");
+            foreach (MovedPackLocation move in moved)
+                db.StorageLocations.Add(new StorageLocation
+                {
+                    ContentChunkId = move.Source.ContentChunkId,
+                    StoragePackId = move.NewPackId,
+                    PackOffset = move.Entry.Offset,
+                    StoredLength = move.Entry.StoredLength,
+                    RawLength = move.Source.RawLength,
+                    CompressionAlgorithm = move.Source.CompressionAlgorithm,
+                    CompressionVersion = move.Source.CompressionVersion,
+                    StorageFormatVersion = move.Source.StorageFormatVersion,
+                    CreatedAt = timeProvider.GetUtcNow()
+                });
+            await db.StorageLocations.Where(x => oldIds.Contains(x.StoragePackId)).ExecuteDeleteAsync(cancellationToken);
+            await db.StoragePacks.Where(x => newPackIds.Contains(x.StoragePackId)).ExecuteUpdateAsync(s => s
+                .SetProperty(x => x.PackStatus, PackStatus.Committed)
+                .SetProperty(x => x.CommittedAt, timeProvider.GetUtcNow()), cancellationToken);
+            await db.StoragePacks.Where(x => oldIds.Contains(x.StoragePackId)).ExecuteUpdateAsync(s => s
+                .SetProperty(x => x.PackStatus, PackStatus.GarbagePending)
+                .SetProperty(x => x.MaintenanceLeaseOwner, (string?)null)
+                .SetProperty(x => x.MaintenanceLeaseUntil, (DateTimeOffset?)null), cancellationToken);
+            await db.SaveChangesAsync(cancellationToken);
+            await transaction.CommitAsync(cancellationToken);
+        });
     }
 
     private static void Verify(StorageLocation location, byte[] stored)

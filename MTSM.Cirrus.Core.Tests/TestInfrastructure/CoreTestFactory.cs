@@ -20,6 +20,11 @@ internal static class CoreTestFactory
                     npgsql.MigrationsHistoryTable(
                         "__EFMigrationsHistory",
                         "cirrus");
+
+                    npgsql.EnableRetryOnFailure(
+                        maxRetryCount: 5,
+                        maxRetryDelay: TimeSpan.FromSeconds(10),
+                        errorCodesToAdd: null);
                 })
             .UseSnakeCaseNamingConvention()
             .Options;
