@@ -4,6 +4,28 @@ using MTSM.Cirrus.Worker;
 var builder = Host.CreateApplicationBuilder(args);
 
 builder.Services
+    .AddOptions<StorageProcessingOptions>()
+    .Bind(builder.Configuration.GetSection(
+        StorageProcessingOptions.SectionName))
+    .Validate(options => options.PollingIntervalSeconds > 0,
+        "Storage-processing polling interval must be greater than zero.")
+    .Validate(options => options.BatchSize is > 0 and <= 1000,
+        "Storage-processing batch size must be between 1 and 1000.")
+    .Validate(options => options.MaxConcurrency is > 0 and <= 100,
+        "Storage-processing concurrency must be between 1 and 100.")
+    .Validate(options => options.MaxConcurrency <= options.BatchSize,
+        "Storage-processing concurrency must not exceed the batch size.")
+    .Validate(options => options.LeaseDurationMinutes >= 3,
+        "Storage-processing lease duration must be at least three minutes.")
+    .Validate(options => options.InitialRetryDelaySeconds > 0,
+        "Initial storage-processing retry delay must be positive.")
+    .Validate(options => options.MaximumRetryDelayMinutes > 0,
+        "Maximum storage-processing retry delay must be positive.")
+    .Validate(options => options.MaximumAttempts > 0,
+        "Maximum storage-processing attempts must be positive.")
+    .ValidateOnStart();
+
+builder.Services
     .AddOptions<IntegrityCheckOptions>()
     .Bind(builder.Configuration.GetSection(
         IntegrityCheckOptions.SectionName))
@@ -63,6 +85,7 @@ string connectionString =
 
 builder.Services.AddCirrusDatabase(connectionString);
 builder.Services.AddCirrusCore(builder.Configuration);
+builder.Services.AddSingleton<StorageProcessingProcessor>();
 builder.Services.AddSingleton<IntegrityCheckProcessor>();
 builder.Services.AddSingleton<PurgeProcessor>();
 builder.Services.AddSingleton(TimeProvider.System);

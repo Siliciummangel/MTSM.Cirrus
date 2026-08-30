@@ -34,6 +34,10 @@ public sealed class ArchiveObjectConfiguration
                     archive_status <> 'Purged'
                     OR purged_at IS NOT NULL
                     """);
+
+                tableBuilder.HasCheckConstraint(
+                    "ck_archive_object_storage_processing_attempt_count",
+                    "storage_processing_attempt_count >= 0");
             });
 
         builder.HasKey(x => x.ArchiveObjectId);
@@ -55,6 +59,39 @@ public sealed class ArchiveObjectConfiguration
 
         builder.Property(x => x.StagingObjectKey)
             .HasMaxLength(1024);
+
+        builder.Property(x => x.StorageProcessingStatus)
+            .HasConversion<string>()
+            .HasMaxLength(32)
+            .HasDefaultValue(StorageProcessingStatus.Completed)
+            .IsRequired();
+
+        builder.Property(x => x.StorageProcessingLeaseOwner)
+            .HasMaxLength(255);
+
+        builder.Property(x => x.StorageProcessingLeaseUntil)
+            .HasColumnType("timestamp with time zone");
+
+        builder.Property(x => x.StorageProcessingAttemptCount)
+            .HasDefaultValue(0);
+
+        builder.Property(x => x.StorageProcessingNextAttemptAt)
+            .HasColumnType("timestamp with time zone");
+
+        builder.Property(x => x.StorageProcessingStartedAt)
+            .HasColumnType("timestamp with time zone");
+
+        builder.Property(x => x.StorageProcessingVerifiedAt)
+            .HasColumnType("timestamp with time zone");
+
+        builder.Property(x => x.StorageProcessingCompletedAt)
+            .HasColumnType("timestamp with time zone");
+
+        builder.Property(x => x.StorageProcessingErrorCode)
+            .HasMaxLength(100);
+
+        builder.Property(x => x.StorageProcessingErrorMessage)
+            .HasColumnType("text");
 
         builder.Property(x => x.BucketName)
             .HasMaxLength(255)
@@ -145,6 +182,13 @@ public sealed class ArchiveObjectConfiguration
             x.ObjectKey
         })
         .IsUnique();
+
+        builder.HasIndex(x => new
+        {
+            x.StorageProcessingStatus,
+            x.StorageProcessingNextAttemptAt,
+            x.StorageProcessingLeaseUntil
+        });
 
         builder.HasIndex(x => new
         {

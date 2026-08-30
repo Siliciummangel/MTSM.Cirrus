@@ -6,6 +6,7 @@
     <Nullable>enable</Nullable>
     <IsPackable>false</IsPackable>
     <IsTestProject>true</IsTestProject>
+    <UserSecretsId>7e62f0d6-7c13-48c4-bbe3-b147ef29f6ed</UserSecretsId>
   </PropertyGroup>
 
   <ItemGroup>

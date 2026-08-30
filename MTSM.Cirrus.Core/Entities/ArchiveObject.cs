@@ -12,6 +12,27 @@ public sealed class ArchiveObject
 
     public string? StagingObjectKey { get; set; }
 
+    public StorageProcessingStatus StorageProcessingStatus { get; set; }
+        = StorageProcessingStatus.Staged;
+
+    public string? StorageProcessingLeaseOwner { get; set; }
+
+    public DateTimeOffset? StorageProcessingLeaseUntil { get; set; }
+
+    public int StorageProcessingAttemptCount { get; set; }
+
+    public DateTimeOffset? StorageProcessingNextAttemptAt { get; set; }
+
+    public DateTimeOffset? StorageProcessingStartedAt { get; set; }
+
+    public DateTimeOffset? StorageProcessingVerifiedAt { get; set; }
+
+    public DateTimeOffset? StorageProcessingCompletedAt { get; set; }
+
+    public string? StorageProcessingErrorCode { get; set; }
+
+    public string? StorageProcessingErrorMessage { get; set; }
+
     public required string BucketName { get; set; }
 
     public required string FileType { get; set; }

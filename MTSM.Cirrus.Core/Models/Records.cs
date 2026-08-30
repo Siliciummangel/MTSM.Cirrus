@@ -64,6 +64,7 @@ public sealed record ArchiveMetadataResult(
     DateOnly RetentionUntil,
     int? RetentionPolicyId,
     ArchiveStatus ArchiveStatus,
+    StorageProcessingStatus StorageProcessingStatus,
     DateTimeOffset? DeletionRequestedAt,
     string? DeletionRequestedBy,
     DateTimeOffset? PurgedAt,

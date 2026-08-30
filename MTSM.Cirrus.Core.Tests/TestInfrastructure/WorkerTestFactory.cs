@@ -240,3 +240,56 @@ internal sealed class TestTimeProvider(DateTimeOffset utcNow) : TimeProvider
     public override DateTimeOffset GetUtcNow() => _utcNow;
     public void Advance(TimeSpan duration) => _utcNow = _utcNow.Add(duration);
 }
+
+internal sealed class StorageWorkerTestContext : IAsyncDisposable
+{
+    private readonly ServiceProvider _serviceProvider;
+
+    private StorageWorkerTestContext(
+        ServiceProvider serviceProvider,
+        StorageProcessingProcessor processor,
+        InMemoryObjectStorage storage,
+        TestTimeProvider clock)
+    {
+        _serviceProvider = serviceProvider;
+        Processor = processor;
+        Storage = storage;
+        Clock = clock;
+    }
+
+    public StorageProcessingProcessor Processor { get; }
+    public InMemoryObjectStorage Storage { get; }
+    public TestTimeProvider Clock { get; }
+
+    public static StorageWorkerTestContext Create(
+        string connectionString,
+        DateTimeOffset now,
+        StorageProcessingOptions? options = null,
+        InMemoryObjectStorage? storage = null)
+    {
+        storage ??= new InMemoryObjectStorage();
+        var clock = new TestTimeProvider(now);
+        var services = new ServiceCollection();
+        services.AddScoped(_ => CoreTestFactory.CreateDbContext(connectionString));
+        services.AddSingleton<IObjectStorage>(storage);
+        ServiceProvider provider = services.BuildServiceProvider();
+        StorageProcessingOptions configured = options ?? new StorageProcessingOptions
+        {
+            PollingIntervalSeconds = 1,
+            BatchSize = 10,
+            MaxConcurrency = 2,
+            LeaseDurationMinutes = 3,
+            InitialRetryDelaySeconds = 30,
+            MaximumRetryDelayMinutes = 5,
+            MaximumAttempts = 3
+        };
+        var processor = new StorageProcessingProcessor(
+            provider.GetRequiredService<IServiceScopeFactory>(),
+            Options.Create(configured),
+            clock,
+            NullLogger<StorageProcessingProcessor>.Instance);
+        return new StorageWorkerTestContext(provider, processor, storage, clock);
+    }
+
+    public ValueTask DisposeAsync() => _serviceProvider.DisposeAsync();
+}

@@ -13,5 +13,7 @@ public enum ArchiveEventType
     RetentionApplied,
     DeletionRequested,
     Purged,
-    PurgeFailed
+    PurgeFailed,
+    StorageProcessingVerified,
+    StorageProcessingFailed
 }

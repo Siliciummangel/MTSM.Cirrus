@@ -116,6 +116,9 @@ public sealed class ArchiveServiceIntegrationTests(PostgresFixture fixture)
             .SingleAsync(item => item.ArchiveObjectId == result.ArchiveObjectId);
 
         Assert.Equal(ArchiveStatus.Active, persisted.ArchiveStatus);
+        Assert.Equal(
+            StorageProcessingStatus.Staged,
+            persisted.StorageProcessingStatus);
         Assert.Equal("invoice.pdf", persisted.OriginalFilename);
         Assert.Equal("invoice", persisted.FileType);
         Assert.Equal("erp", persisted.SourceSystem);

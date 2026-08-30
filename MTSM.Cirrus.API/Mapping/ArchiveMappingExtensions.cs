@@ -63,6 +63,7 @@ public static class ArchiveResponseMapper
             result.RetentionUntil,
             result.RetentionPolicyId,
             result.ArchiveStatus,
+            result.StorageProcessingStatus,
             result.DeletionRequestedAt,
             result.DeletionRequestedBy,
             result.PurgedAt,

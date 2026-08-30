@@ -174,6 +174,9 @@ public sealed class ArchiveApiIntegrationTests
         Assert.Equal(
             "payload.txt",
             metadata.RootElement.GetProperty("originalFilename").GetString());
+        Assert.Equal(
+            "Completed",
+            metadata.RootElement.GetProperty("storageProcessingStatus").GetString());
         Assert.Equal(HttpStatusCode.OK, headResponse.StatusCode);
         Assert.Equal(7, headResponse.Content.Headers.ContentLength);
         Assert.Equal("Active", headResponse.Headers.GetValues("X-Archive-Status").Single());
@@ -356,6 +359,7 @@ public sealed class ArchiveApiIntegrationTests
             new DateOnly(2036, 8, 19),
             null,
             ArchiveStatus.Active,
+            StorageProcessingStatus.Completed,
             null,
             null,
             null,

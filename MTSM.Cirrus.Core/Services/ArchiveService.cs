@@ -99,6 +99,7 @@ public sealed class ArchiveService : IArchiveService
             TenantId = tenant.TenantId,
             ObjectKey = null,
             StagingObjectKey = stagingObjectKey,
+            StorageProcessingStatus = StorageProcessingStatus.Staged,
             BucketName = tenant.BucketName,
 
             FileType = fileType,
@@ -387,6 +388,7 @@ public sealed class ArchiveService : IArchiveService
                 x.RetentionUntil,
                 x.RetentionPolicyId,
                 x.ArchiveStatus,
+                x.StorageProcessingStatus,
                 x.DeletionRequestedAt,
                 x.DeletionRequestedBy,
                 x.PurgedAt,

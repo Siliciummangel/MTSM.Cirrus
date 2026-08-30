@@ -3,12 +3,16 @@ using Microsoft.Extensions.Options;
 namespace MTSM.Cirrus.Worker;
 
 public sealed class Worker(
+    StorageProcessingProcessor storageProcessingProcessor,
     IntegrityCheckProcessor integrityProcessor,
     PurgeProcessor purgeProcessor,
+    IOptions<StorageProcessingOptions> storageProcessingOptions,
     IOptions<IntegrityCheckOptions> integrityOptions,
     IOptions<PurgeOptions> purgeOptions,
     ILogger<Worker> logger) : BackgroundService
 {
+    private readonly StorageProcessingOptions _storageProcessingOptions =
+        storageProcessingOptions.Value;
     private readonly IntegrityCheckOptions _integrityOptions = integrityOptions.Value;
     private readonly PurgeOptions _purgeOptions = purgeOptions.Value;
 
@@ -18,13 +22,17 @@ public sealed class Worker(
 
         logger.LogInformation(
             "Archive worker {WorkerInstanceId} started. " +
+            "Storage processing enabled: {StorageProcessingEnabled}; " +
             "Integrity checks enabled: {IntegrityEnabled}; " +
             "purge enabled: {PurgeEnabled}.",
             workerInstanceId,
+            _storageProcessingOptions.Enabled,
             _integrityOptions.Enabled,
             _purgeOptions.Enabled);
 
-        if (!_integrityOptions.Enabled && !_purgeOptions.Enabled)
+        if (!_storageProcessingOptions.Enabled
+            && !_integrityOptions.Enabled
+            && !_purgeOptions.Enabled)
         {
             await WaitForShutdownAsync(cancellationToken);
 
@@ -39,6 +47,12 @@ public sealed class Worker(
         {
             while (!cancellationToken.IsCancellationRequested)
             {
+                int storageProcessingClaimed =
+                    _storageProcessingOptions.Enabled
+                        ? await storageProcessingProcessor.ProcessBatchAsync(
+                            workerInstanceId,
+                            cancellationToken)
+                        : 0;
                 int integrityClaimed = _integrityOptions.Enabled
                     ? await integrityProcessor.ProcessBatchAsync(workerInstanceId, cancellationToken)
                     : 0;
@@ -46,18 +60,24 @@ public sealed class Worker(
                     ? await purgeProcessor.ProcessBatchAsync(workerInstanceId, cancellationToken)
                     : 0;
 
-                if (integrityClaimed < _integrityOptions.BatchSize
+                if (storageProcessingClaimed
+                        < _storageProcessingOptions.BatchSize
+                    && integrityClaimed < _integrityOptions.BatchSize
                     && purgeClaimed < _purgeOptions.BatchSize)
                 {
                     await Task.Delay(
                         TimeSpan.FromSeconds(
                             Math.Min(
-                                _integrityOptions.Enabled
-                                    ? _integrityOptions.PollingIntervalSeconds
+                                _storageProcessingOptions.Enabled
+                                    ? _storageProcessingOptions.PollingIntervalSeconds
                                     : int.MaxValue,
-                                _purgeOptions.Enabled
-                                    ? _purgeOptions.PollingIntervalSeconds
-                                    : int.MaxValue)),
+                                Math.Min(
+                                    _integrityOptions.Enabled
+                                        ? _integrityOptions.PollingIntervalSeconds
+                                        : int.MaxValue,
+                                    _purgeOptions.Enabled
+                                        ? _purgeOptions.PollingIntervalSeconds
+                                        : int.MaxValue))),
                         cancellationToken);
                 }
             }
