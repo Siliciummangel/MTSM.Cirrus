@@ -190,6 +190,7 @@ jobs:
           case "$SERVICE" in
             api)
               docker run --detach --rm --name cirrus-api-smoke --network host \
+                --read-only --tmpfs /tmp:rw,noexec,nosuid,nodev,size=64m \
                 --env ASPNETCORE_HTTP_PORTS=18080 \
                 --env "ConnectionStrings__ArchiveDatabase=$database" \
                 --env S3__ServiceUrl=http://127.0.0.1:8333 \
@@ -201,11 +202,13 @@ jobs:
               trap 'docker logs cirrus-api-smoke || true; docker stop cirrus-api-smoke || true' EXIT
               for _ in {1..30}; do
                 if curl --fail --silent http://127.0.0.1:18080/health/live >/dev/null; then
-                  exit 0
+                  break
                 fi
                 sleep 1
               done
-              exit 1
+
+              curl --fail --silent http://127.0.0.1:18080/health/live >/dev/null
+              test "$(docker inspect cirrus-api-smoke --format '{{.Config.User}}')" != "0"
               ;;
             worker)
               docker run --detach --name cirrus-worker-smoke --network host \

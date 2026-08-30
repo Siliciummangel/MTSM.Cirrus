@@ -1,4 +1,5 @@
 ﻿using Microsoft.AspNetCore.Http.Features;
+using Microsoft.AspNetCore.Authentication;
 using Microsoft.AspNetCore.Server.Kestrel.Core;
 using Microsoft.Extensions.Options;
 using MTSM.Cirrus.API.Config;
@@ -48,7 +49,9 @@ public static class ServiceCollectionExtensions
         services.AddScoped<ICirrusIdentityAccessor, HttpCirrusIdentityAccessor>();
         services.AddScoped<TenantBoundaryFilter>();
 
-        services.AddAuthentication(ApiKeyOptions.Scheme)
+        services.AddAuthenticationCore(options =>
+            options.DefaultScheme = ApiKeyOptions.Scheme);
+        new AuthenticationBuilder(services)
             .AddScheme<ApiKeyOptions, ApiKeyAuthenticationHandler>(ApiKeyOptions.Scheme, _ => { });
 
         services.AddAuthorizationBuilder()

@@ -102,9 +102,9 @@ docker compose \
   up --detach --wait
 ```
 
-The first start creates persistent volumes for PostgreSQL, SeaweedFS and ASP.NET
-Core data-protection keys. PostgreSQL and SeaweedFS must become healthy before
-migration runs. API and worker start only after migration exits successfully.
+The first start creates persistent volumes for PostgreSQL and SeaweedFS.
+PostgreSQL and SeaweedFS must become healthy before migration runs. API and
+worker start only after migration exits successfully.
 
 Verify the deployment:
 
@@ -122,13 +122,12 @@ worker should remain running.
 
 ## Persistent data
 
-The Compose project owns three named volumes:
+The Compose project owns two named volumes:
 
 | Volume suffix | Content |
 |---|---|
 | `postgres-data` | Database schema, metadata, identities and audit events |
 | `storage-data` | SeaweedFS metadata and archived binary content |
-| `api-data-protection` | ASP.NET Core data-protection keys |
 
 `docker compose down` preserves these volumes. Never use `down --volumes` on a
 production installation unless the complete installation is intentionally being
@@ -145,8 +144,7 @@ At minimum:
 1. Create scheduled PostgreSQL backups with `pg_dump` or the organization's
    PostgreSQL backup system.
 2. Replicate or back up archived S3 objects to storage outside the Docker host.
-3. Protect the environment file and data-protection keys in an encrypted
-   configuration backup.
+3. Protect the environment file in an encrypted configuration backup.
 4. Record the deployed Cirrus, PostgreSQL and SeaweedFS versions.
 5. Test a full restore regularly on a different host.
 

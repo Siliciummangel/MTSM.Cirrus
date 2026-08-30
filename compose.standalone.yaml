@@ -138,8 +138,6 @@ services:
       AllowedHosts: ${CIRRUS_ALLOWED_HOSTS:?Set CIRRUS_ALLOWED_HOSTS}
     ports:
       - "${CIRRUS_BIND_ADDRESS:-127.0.0.1}:${CIRRUS_API_PORT:-8080}:8080"
-    volumes:
-      - api-data-protection:/home/app/.aspnet/DataProtection-Keys
     depends_on:
       postgres:
         condition: service_healthy
@@ -223,4 +221,3 @@ services:
 volumes:
   postgres-data:
   storage-data:
-  api-data-protection:
