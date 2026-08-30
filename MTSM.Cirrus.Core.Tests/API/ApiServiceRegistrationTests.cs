@@ -2,6 +2,7 @@ using Microsoft.AspNetCore.Authentication;
 using Microsoft.AspNetCore.DataProtection;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Options;
 using MTSM.Cirrus.API.Extensions;
 using MTSM.Cirrus.API.Security;
 
@@ -33,7 +34,11 @@ public sealed class ApiServiceRegistrationTests
         await using ServiceProvider provider = services.BuildServiceProvider();
         var schemes = provider.GetRequiredService<IAuthenticationSchemeProvider>();
         AuthenticationScheme? defaultScheme = await schemes.GetDefaultAuthenticateSchemeAsync();
+        ApiKeyOptions schemeOptions = provider
+            .GetRequiredService<IOptionsMonitor<ApiKeyOptions>>()
+            .Get(ApiKeyOptions.Scheme);
 
         Assert.Equal(ApiKeyOptions.Scheme, defaultScheme?.Name);
+        Assert.NotNull(schemeOptions.TimeProvider);
     }
 }

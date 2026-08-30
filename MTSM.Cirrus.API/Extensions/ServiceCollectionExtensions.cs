@@ -1,6 +1,7 @@
 ﻿using Microsoft.AspNetCore.Http.Features;
 using Microsoft.AspNetCore.Authentication;
 using Microsoft.AspNetCore.Server.Kestrel.Core;
+using Microsoft.Extensions.DependencyInjection.Extensions;
 using Microsoft.Extensions.Options;
 using MTSM.Cirrus.API.Config;
 using MTSM.Cirrus.API.Security;
@@ -51,6 +52,7 @@ public static class ServiceCollectionExtensions
 
         services.AddAuthenticationCore(options =>
             options.DefaultScheme = ApiKeyOptions.Scheme);
+        services.TryAddSingleton(TimeProvider.System);
         new AuthenticationBuilder(services)
             .AddScheme<ApiKeyOptions, ApiKeyAuthenticationHandler>(ApiKeyOptions.Scheme, _ => { });
 
