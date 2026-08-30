@@ -54,6 +54,14 @@ public sealed class ArchiveObjectConfiguration
         builder.Property(x => x.TenantId)
             .IsRequired();
 
+        builder.HasIndex(x => x.ContentManifestId);
+
+        builder.HasOne(x => x.ContentManifest)
+            .WithMany(x => x.ArchiveObjects)
+            .HasForeignKey(x => new { x.TenantId, x.ContentManifestId })
+            .HasPrincipalKey(x => new { x.TenantId, x.ContentManifestId })
+            .OnDelete(DeleteBehavior.Restrict);
+
         builder.Property(x => x.ObjectKey)
             .HasMaxLength(1024);
 

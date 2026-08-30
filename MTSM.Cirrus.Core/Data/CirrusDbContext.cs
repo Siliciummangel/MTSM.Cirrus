@@ -13,6 +13,12 @@ public sealed class CirrusDbContext : DbContext
     public DbSet<ArchiveObject> ArchiveObjects =>
         Set<ArchiveObject>();
 
+    public DbSet<ContentManifest> ContentManifests => Set<ContentManifest>();
+    public DbSet<ManifestChunk> ManifestChunks => Set<ManifestChunk>();
+    public DbSet<ContentChunk> ContentChunks => Set<ContentChunk>();
+    public DbSet<StoragePack> StoragePacks => Set<StoragePack>();
+    public DbSet<StorageLocation> StorageLocations => Set<StorageLocation>();
+
     public DbSet<Tenant> Tenants =>
         Set<Tenant>();
 

@@ -26,7 +26,7 @@ public sealed record ArchiveEventResponse(
 public sealed record ArchiveMetadataResponse(
     long ArchiveObjectId,
     long TenantId,
-    string ObjectKey,
+    string? ObjectKey,
     string BucketName,
     string FileType,
     string? MimeType,

@@ -1,4 +1,5 @@
 using MTSM.Cirrus.Core.Abstractions;
+using MTSM.Cirrus.Core.Exceptions;
 using MTSM.Cirrus.Core.Models;
 using System.Collections.Concurrent;
 
@@ -66,6 +67,29 @@ internal sealed class InMemoryObjectStorage : IObjectStorage
 
         LastReadStream = new TrackingMemoryStream(content);
         return Task.FromResult<Stream>(LastReadStream);
+    }
+
+    public Task<Stream> OpenReadRangeAsync(
+        string bucketName,
+        string objectKey,
+        long offset,
+        long length,
+        CancellationToken cancellationToken = default)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+        ArgumentOutOfRangeException.ThrowIfNegative(offset);
+        ArgumentOutOfRangeException.ThrowIfNegativeOrZero(length);
+
+        if (!_objects.TryGetValue((bucketName, objectKey), out byte[]? content)
+            || offset > content.LongLength
+            || length > content.LongLength - offset)
+        {
+            throw new ObjectStorageException("Object or requested range was not found.");
+        }
+
+        var result = new byte[checked((int)length)];
+        Buffer.BlockCopy(content, checked((int)offset), result, 0, result.Length);
+        return Task.FromResult<Stream>(new MemoryStream(result, writable: false));
     }
 
     public Task<bool> ExistsAsync(

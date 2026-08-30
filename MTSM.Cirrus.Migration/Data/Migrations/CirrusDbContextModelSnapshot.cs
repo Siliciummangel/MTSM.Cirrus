@@ -302,6 +302,10 @@ namespace MTSM.Cirrus.Migration.Data.Migrations
                         .HasColumnType("character varying(255)")
                         .HasColumnName("bucket_name");
 
+                    b.Property<long?>("ContentManifestId")
+                        .HasColumnType("bigint")
+                        .HasColumnName("content_manifest_id");
+
                     b.Property<string>("CreatedBy")
                         .IsRequired()
                         .HasMaxLength(255)
@@ -485,6 +489,9 @@ namespace MTSM.Cirrus.Migration.Data.Migrations
                     b.HasIndex("ArchivedAt")
                         .HasDatabaseName("ix_archive_object_archived_at");
 
+                    b.HasIndex("ContentManifestId")
+                        .HasDatabaseName("ix_archive_object_content_manifest_id");
+
                     b.HasIndex("DeletionRequestedAt")
                         .HasDatabaseName("ix_archive_object_deletion_requested_at");
 
@@ -502,6 +509,9 @@ namespace MTSM.Cirrus.Migration.Data.Migrations
 
                     b.HasIndex("TenantId", "ArchiveStatus")
                         .HasDatabaseName("ix_archive_object_tenant_id_archive_status");
+
+                    b.HasIndex("TenantId", "ContentManifestId")
+                        .HasDatabaseName("ix_archive_object_tenant_id_content_manifest_id");
 
                     b.HasIndex("TenantId", "ReceivedAt")
                         .HasDatabaseName("ix_archive_object_tenant_id_received_at");
@@ -566,6 +576,132 @@ namespace MTSM.Cirrus.Migration.Data.Migrations
                         .HasDatabaseName("ix_business_ref_type_reference_type_key");
 
                     b.ToTable("business_ref_type", "cirrus");
+                });
+
+            modelBuilder.Entity("MTSM.Cirrus.Core.Entities.ContentChunk", b =>
+                {
+                    b.Property<long>("ContentChunkId")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("bigint")
+                        .HasColumnName("content_chunk_id");
+
+                    NpgsqlPropertyBuilderExtensions.UseIdentityByDefaultColumn(b.Property<long>("ContentChunkId"));
+
+                    b.Property<string>("ChunkHash")
+                        .IsRequired()
+                        .HasColumnType("char(64)")
+                        .HasColumnName("chunk_hash");
+
+                    b.Property<DateTimeOffset>("CreatedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("created_at");
+
+                    b.Property<string>("HashAlgorithm")
+                        .IsRequired()
+                        .HasMaxLength(32)
+                        .HasColumnType("character varying(32)")
+                        .HasColumnName("hash_algorithm");
+
+                    b.Property<long>("RawSizeBytes")
+                        .HasColumnType("bigint")
+                        .HasColumnName("raw_size_bytes");
+
+                    b.Property<long>("TenantId")
+                        .HasColumnType("bigint")
+                        .HasColumnName("tenant_id");
+
+                    b.HasKey("ContentChunkId")
+                        .HasName("pk_content_chunk");
+
+                    b.HasIndex("TenantId", "HashAlgorithm", "ChunkHash")
+                        .IsUnique()
+                        .HasDatabaseName("ix_content_chunk_tenant_id_hash_algorithm_chunk_hash");
+
+                    b.ToTable("content_chunk", "cirrus", t =>
+                        {
+                            t.HasCheckConstraint("ck_content_chunk_raw_size", "raw_size_bytes > 0");
+                        });
+                });
+
+            modelBuilder.Entity("MTSM.Cirrus.Core.Entities.ContentManifest", b =>
+                {
+                    b.Property<long>("ContentManifestId")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("bigint")
+                        .HasColumnName("content_manifest_id");
+
+                    NpgsqlPropertyBuilderExtensions.UseIdentityByDefaultColumn(b.Property<long>("ContentManifestId"));
+
+                    b.Property<int>("AverageChunkSizeBytes")
+                        .HasColumnType("integer")
+                        .HasColumnName("average_chunk_size_bytes");
+
+                    b.Property<int>("ChunkCount")
+                        .HasColumnType("integer")
+                        .HasColumnName("chunk_count");
+
+                    b.Property<string>("ChunkingAlgorithm")
+                        .IsRequired()
+                        .HasMaxLength(64)
+                        .HasColumnType("character varying(64)")
+                        .HasColumnName("chunking_algorithm");
+
+                    b.Property<int>("ChunkingAlgorithmVersion")
+                        .HasColumnType("integer")
+                        .HasColumnName("chunking_algorithm_version");
+
+                    b.Property<DateTimeOffset>("CommittedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("committed_at");
+
+                    b.Property<string>("HashAlgorithm")
+                        .IsRequired()
+                        .HasMaxLength(32)
+                        .HasColumnType("character varying(32)")
+                        .HasColumnName("hash_algorithm");
+
+                    b.Property<int>("ManifestFormatVersion")
+                        .HasColumnType("integer")
+                        .HasColumnName("manifest_format_version");
+
+                    b.Property<int>("MaximumChunkSizeBytes")
+                        .HasColumnType("integer")
+                        .HasColumnName("maximum_chunk_size_bytes");
+
+                    b.Property<int>("MinimumChunkSizeBytes")
+                        .HasColumnType("integer")
+                        .HasColumnName("minimum_chunk_size_bytes");
+
+                    b.Property<string>("OriginalHash")
+                        .IsRequired()
+                        .HasColumnType("char(64)")
+                        .HasColumnName("original_hash");
+
+                    b.Property<long>("OriginalSizeBytes")
+                        .HasColumnType("bigint")
+                        .HasColumnName("original_size_bytes");
+
+                    b.Property<long>("TenantId")
+                        .HasColumnType("bigint")
+                        .HasColumnName("tenant_id");
+
+                    b.HasKey("ContentManifestId")
+                        .HasName("pk_content_manifest");
+
+                    b.HasAlternateKey("TenantId", "ContentManifestId")
+                        .HasName("ak_content_manifests_tenant_id_content_manifest_id");
+
+                    b.HasIndex("TenantId", "OriginalHash")
+                        .HasDatabaseName("ix_content_manifest_tenant_id_original_hash");
+
+                    b.ToTable("content_manifest", "cirrus", t =>
+                        {
+                            t.HasCheckConstraint("ck_content_manifest_chunk_count", "chunk_count > 0");
+
+                            t.HasCheckConstraint("ck_content_manifest_chunk_sizes", "minimum_chunk_size_bytes > 0 AND average_chunk_size_bytes >= minimum_chunk_size_bytes AND maximum_chunk_size_bytes >= average_chunk_size_bytes");
+
+                            t.HasCheckConstraint("ck_content_manifest_original_size", "original_size_bytes >= 0");
+                        });
                 });
 
             modelBuilder.Entity("MTSM.Cirrus.Core.Entities.MachineIdentity", b =>
@@ -659,6 +795,44 @@ namespace MTSM.Cirrus.Migration.Data.Migrations
                     b.ToTable("machine_identity_permission", "cirrus", t =>
                         {
                             t.HasCheckConstraint("ck_machine_identity_permission_value", "permission IN ('ArchiveRead', 'ArchiveWrite', 'ArchiveDelete', 'ArchiveVerify')");
+                        });
+                });
+
+            modelBuilder.Entity("MTSM.Cirrus.Core.Entities.ManifestChunk", b =>
+                {
+                    b.Property<long>("ContentManifestId")
+                        .HasColumnType("bigint")
+                        .HasColumnName("content_manifest_id");
+
+                    b.Property<int>("SequenceNumber")
+                        .HasColumnType("integer")
+                        .HasColumnName("sequence_number");
+
+                    b.Property<long>("ContentChunkId")
+                        .HasColumnType("bigint")
+                        .HasColumnName("content_chunk_id");
+
+                    b.Property<long>("OriginalOffset")
+                        .HasColumnType("bigint")
+                        .HasColumnName("original_offset");
+
+                    b.Property<int>("RawLength")
+                        .HasColumnType("integer")
+                        .HasColumnName("raw_length");
+
+                    b.HasKey("ContentManifestId", "SequenceNumber")
+                        .HasName("pk_manifest_chunk");
+
+                    b.HasIndex("ContentChunkId")
+                        .HasDatabaseName("ix_manifest_chunk_content_chunk_id");
+
+                    b.ToTable("manifest_chunk", "cirrus", t =>
+                        {
+                            t.HasCheckConstraint("ck_manifest_chunk_length", "raw_length > 0");
+
+                            t.HasCheckConstraint("ck_manifest_chunk_offset", "original_offset >= 0");
+
+                            t.HasCheckConstraint("ck_manifest_chunk_sequence", "sequence_number >= 0");
                         });
                 });
 
@@ -767,6 +941,174 @@ namespace MTSM.Cirrus.Migration.Data.Migrations
                         .HasDatabaseName("ix_security_audit_event_tenant_id_machine_identity_id");
 
                     b.ToTable("security_audit_event", "cirrus");
+                });
+
+            modelBuilder.Entity("MTSM.Cirrus.Core.Entities.StorageLocation", b =>
+                {
+                    b.Property<long>("StorageLocationId")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("bigint")
+                        .HasColumnName("storage_location_id");
+
+                    NpgsqlPropertyBuilderExtensions.UseIdentityByDefaultColumn(b.Property<long>("StorageLocationId"));
+
+                    b.Property<string>("CompressionAlgorithm")
+                        .IsRequired()
+                        .HasMaxLength(32)
+                        .HasColumnType("character varying(32)")
+                        .HasColumnName("compression_algorithm");
+
+                    b.Property<int>("CompressionVersion")
+                        .HasColumnType("integer")
+                        .HasColumnName("compression_version");
+
+                    b.Property<long>("ContentChunkId")
+                        .HasColumnType("bigint")
+                        .HasColumnName("content_chunk_id");
+
+                    b.Property<DateTimeOffset>("CreatedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("created_at");
+
+                    b.Property<long>("PackOffset")
+                        .HasColumnType("bigint")
+                        .HasColumnName("pack_offset");
+
+                    b.Property<int>("RawLength")
+                        .HasColumnType("integer")
+                        .HasColumnName("raw_length");
+
+                    b.Property<int>("StorageFormatVersion")
+                        .HasColumnType("integer")
+                        .HasColumnName("storage_format_version");
+
+                    b.Property<long>("StoragePackId")
+                        .HasColumnType("bigint")
+                        .HasColumnName("storage_pack_id");
+
+                    b.Property<int>("StoredLength")
+                        .HasColumnType("integer")
+                        .HasColumnName("stored_length");
+
+                    b.HasKey("StorageLocationId")
+                        .HasName("pk_storage_location");
+
+                    b.HasIndex("ContentChunkId")
+                        .HasDatabaseName("ix_storage_location_content_chunk_id");
+
+                    b.HasIndex("StoragePackId", "PackOffset")
+                        .IsUnique()
+                        .HasDatabaseName("ix_storage_location_storage_pack_id_pack_offset");
+
+                    b.ToTable("storage_location", "cirrus", t =>
+                        {
+                            t.HasCheckConstraint("ck_storage_location_lengths", "stored_length > 0 AND raw_length > 0");
+
+                            t.HasCheckConstraint("ck_storage_location_offset", "pack_offset >= 0");
+                        });
+                });
+
+            modelBuilder.Entity("MTSM.Cirrus.Core.Entities.StoragePack", b =>
+                {
+                    b.Property<long>("StoragePackId")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("bigint")
+                        .HasColumnName("storage_pack_id");
+
+                    NpgsqlPropertyBuilderExtensions.UseIdentityByDefaultColumn(b.Property<long>("StoragePackId"));
+
+                    b.Property<string>("BucketName")
+                        .IsRequired()
+                        .HasMaxLength(255)
+                        .HasColumnType("character varying(255)")
+                        .HasColumnName("bucket_name");
+
+                    b.Property<DateTimeOffset?>("CommittedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("committed_at");
+
+                    b.Property<DateTimeOffset>("CreatedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("created_at");
+
+                    b.Property<string>("HashAlgorithm")
+                        .IsRequired()
+                        .HasMaxLength(32)
+                        .HasColumnType("character varying(32)")
+                        .HasColumnName("hash_algorithm");
+
+                    b.Property<int>("MaintenanceAttempts")
+                        .HasColumnType("integer")
+                        .HasColumnName("maintenance_attempts");
+
+                    b.Property<string>("MaintenanceError")
+                        .HasMaxLength(1024)
+                        .HasColumnType("character varying(1024)")
+                        .HasColumnName("maintenance_error");
+
+                    b.Property<string>("MaintenanceLeaseOwner")
+                        .HasMaxLength(255)
+                        .HasColumnType("character varying(255)")
+                        .HasColumnName("maintenance_lease_owner");
+
+                    b.Property<DateTimeOffset?>("MaintenanceLeaseUntil")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("maintenance_lease_until");
+
+                    b.Property<string>("ObjectKey")
+                        .IsRequired()
+                        .HasMaxLength(1024)
+                        .HasColumnType("character varying(1024)")
+                        .HasColumnName("object_key");
+
+                    b.Property<int>("PackFormatVersion")
+                        .HasColumnType("integer")
+                        .HasColumnName("pack_format_version");
+
+                    b.Property<string>("PackHash")
+                        .HasColumnType("char(64)")
+                        .HasColumnName("pack_hash");
+
+                    b.Property<string>("PackStatus")
+                        .IsRequired()
+                        .HasMaxLength(32)
+                        .HasColumnType("character varying(32)")
+                        .HasColumnName("pack_status");
+
+                    b.Property<long>("SizeBytes")
+                        .HasColumnType("bigint")
+                        .HasColumnName("size_bytes");
+
+                    b.Property<string>("StorageVersionId")
+                        .HasMaxLength(1024)
+                        .HasColumnType("character varying(1024)")
+                        .HasColumnName("storage_version_id");
+
+                    b.Property<long>("TenantId")
+                        .HasColumnType("bigint")
+                        .HasColumnName("tenant_id");
+
+                    b.Property<DateTimeOffset?>("UploadedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("uploaded_at");
+
+                    b.HasKey("StoragePackId")
+                        .HasName("pk_storage_pack");
+
+                    b.HasIndex("MaintenanceLeaseUntil")
+                        .HasDatabaseName("ix_storage_pack_maintenance_lease_until");
+
+                    b.HasIndex("PackStatus", "CreatedAt")
+                        .HasDatabaseName("ix_storage_pack_pack_status_created_at");
+
+                    b.HasIndex("TenantId", "BucketName", "ObjectKey")
+                        .IsUnique()
+                        .HasDatabaseName("ix_storage_pack_tenant_id_bucket_name_object_key");
+
+                    b.ToTable("storage_pack", "cirrus", t =>
+                        {
+                            t.HasCheckConstraint("ck_storage_pack_size", "size_bytes >= 0");
+                        });
                 });
 
             modelBuilder.Entity("MTSM.Cirrus.Core.Entities.Tenant", b =>
@@ -918,7 +1260,40 @@ namespace MTSM.Cirrus.Migration.Data.Migrations
                         .IsRequired()
                         .HasConstraintName("fk_archive_object_tenants_tenant_id");
 
+                    b.HasOne("MTSM.Cirrus.Core.Entities.ContentManifest", "ContentManifest")
+                        .WithMany("ArchiveObjects")
+                        .HasForeignKey("TenantId", "ContentManifestId")
+                        .HasPrincipalKey("TenantId", "ContentManifestId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .HasConstraintName("fk_archive_object_content_manifests_tenant_id_content_manifest");
+
+                    b.Navigation("ContentManifest");
+
                     b.Navigation("RetentionPolicy");
+
+                    b.Navigation("Tenant");
+                });
+
+            modelBuilder.Entity("MTSM.Cirrus.Core.Entities.ContentChunk", b =>
+                {
+                    b.HasOne("MTSM.Cirrus.Core.Entities.Tenant", "Tenant")
+                        .WithMany("ContentChunks")
+                        .HasForeignKey("TenantId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired()
+                        .HasConstraintName("fk_content_chunk_tenants_tenant_id");
+
+                    b.Navigation("Tenant");
+                });
+
+            modelBuilder.Entity("MTSM.Cirrus.Core.Entities.ContentManifest", b =>
+                {
+                    b.HasOne("MTSM.Cirrus.Core.Entities.Tenant", "Tenant")
+                        .WithMany("ContentManifests")
+                        .HasForeignKey("TenantId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired()
+                        .HasConstraintName("fk_content_manifest_tenants_tenant_id");
 
                     b.Navigation("Tenant");
                 });
@@ -947,6 +1322,27 @@ namespace MTSM.Cirrus.Migration.Data.Migrations
                     b.Navigation("MachineIdentity");
                 });
 
+            modelBuilder.Entity("MTSM.Cirrus.Core.Entities.ManifestChunk", b =>
+                {
+                    b.HasOne("MTSM.Cirrus.Core.Entities.ContentChunk", "ContentChunk")
+                        .WithMany("ManifestChunks")
+                        .HasForeignKey("ContentChunkId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired()
+                        .HasConstraintName("fk_manifest_chunk_content_chunk_content_chunk_id");
+
+                    b.HasOne("MTSM.Cirrus.Core.Entities.ContentManifest", "ContentManifest")
+                        .WithMany("Chunks")
+                        .HasForeignKey("ContentManifestId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired()
+                        .HasConstraintName("fk_manifest_chunk_content_manifest_content_manifest_id");
+
+                    b.Navigation("ContentChunk");
+
+                    b.Navigation("ContentManifest");
+                });
+
             modelBuilder.Entity("MTSM.Cirrus.Core.Entities.SecurityAuditEvent", b =>
                 {
                     b.HasOne("MTSM.Cirrus.Core.Entities.Tenant", "Tenant")
@@ -965,6 +1361,39 @@ namespace MTSM.Cirrus.Migration.Data.Migrations
                         .HasConstraintName("fk_security_audit_event_machine_identity_tenant_id_machine_ide");
 
                     b.Navigation("MachineIdentity");
+
+                    b.Navigation("Tenant");
+                });
+
+            modelBuilder.Entity("MTSM.Cirrus.Core.Entities.StorageLocation", b =>
+                {
+                    b.HasOne("MTSM.Cirrus.Core.Entities.ContentChunk", "ContentChunk")
+                        .WithMany("StorageLocations")
+                        .HasForeignKey("ContentChunkId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired()
+                        .HasConstraintName("fk_storage_location_content_chunk_content_chunk_id");
+
+                    b.HasOne("MTSM.Cirrus.Core.Entities.StoragePack", "StoragePack")
+                        .WithMany("StorageLocations")
+                        .HasForeignKey("StoragePackId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired()
+                        .HasConstraintName("fk_storage_location_storage_packs_storage_pack_id");
+
+                    b.Navigation("ContentChunk");
+
+                    b.Navigation("StoragePack");
+                });
+
+            modelBuilder.Entity("MTSM.Cirrus.Core.Entities.StoragePack", b =>
+                {
+                    b.HasOne("MTSM.Cirrus.Core.Entities.Tenant", "Tenant")
+                        .WithMany("StoragePacks")
+                        .HasForeignKey("TenantId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired()
+                        .HasConstraintName("fk_storage_pack_tenants_tenant_id");
 
                     b.Navigation("Tenant");
                 });
@@ -994,6 +1423,20 @@ namespace MTSM.Cirrus.Migration.Data.Migrations
                     b.Navigation("BusinessReferences");
                 });
 
+            modelBuilder.Entity("MTSM.Cirrus.Core.Entities.ContentChunk", b =>
+                {
+                    b.Navigation("ManifestChunks");
+
+                    b.Navigation("StorageLocations");
+                });
+
+            modelBuilder.Entity("MTSM.Cirrus.Core.Entities.ContentManifest", b =>
+                {
+                    b.Navigation("ArchiveObjects");
+
+                    b.Navigation("Chunks");
+                });
+
             modelBuilder.Entity("MTSM.Cirrus.Core.Entities.MachineIdentity", b =>
                 {
                     b.Navigation("ApiKeyCredentials");
@@ -1006,9 +1449,20 @@ namespace MTSM.Cirrus.Migration.Data.Migrations
                     b.Navigation("ArchiveObjects");
                 });
 
+            modelBuilder.Entity("MTSM.Cirrus.Core.Entities.StoragePack", b =>
+                {
+                    b.Navigation("StorageLocations");
+                });
+
             modelBuilder.Entity("MTSM.Cirrus.Core.Entities.Tenant", b =>
                 {
                     b.Navigation("ArchiveObjects");
+
+                    b.Navigation("ContentChunks");
+
+                    b.Navigation("ContentManifests");
+
+                    b.Navigation("StoragePacks");
                 });
 #pragma warning restore 612, 618
         }

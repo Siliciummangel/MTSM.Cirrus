@@ -25,5 +25,9 @@ public sealed class Tenant
     public ICollection<ArchiveObject> ArchiveObjects { get; set; }
         = new List<ArchiveObject>();
 
+    public ICollection<ContentManifest> ContentManifests { get; set; } = [];
+    public ICollection<ContentChunk> ContentChunks { get; set; } = [];
+    public ICollection<StoragePack> StoragePacks { get; set; } = [];
+
     public RetentionPolicy? DefaultRetentionPolicy { get; set; }
 }

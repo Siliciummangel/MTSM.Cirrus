@@ -37,6 +37,15 @@ public sealed class S3ObjectStorageIntegrationTests(S3Fixture fixture)
         await storedContent.CopyToAsync(destination);
 
         Assert.Equal(expectedContent, destination.ToArray());
+
+        await using Stream range = await storage.OpenReadRangeAsync(
+            fixture.BucketName,
+            objectKey,
+            1024,
+            4096);
+        using var rangeDestination = new MemoryStream();
+        await range.CopyToAsync(rangeDestination);
+        Assert.Equal(expectedContent.AsSpan(1024, 4096).ToArray(), rangeDestination.ToArray());
     }
 
     [S3Fact]

@@ -10,7 +10,8 @@ public sealed record ObjectStorageWriteResult(
 public enum ObjectStorageDeleteOutcome
 {
     Deleted,
-    NotFound
+    NotFound,
+    DeferredToGarbageCollection
 }
 
 public sealed record ArchiveBusinessReferenceInput(
@@ -50,7 +51,7 @@ public sealed record ArchiveEventResult(
 public sealed record ArchiveMetadataResult(
     long ArchiveObjectId,
     long TenantId,
-    string ObjectKey,
+    string? ObjectKey,
     string BucketName,
     string FileType,
     string? MimeType,

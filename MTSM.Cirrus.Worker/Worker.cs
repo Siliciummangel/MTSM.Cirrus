@@ -1,9 +1,12 @@
 using Microsoft.Extensions.Options;
+using MTSM.Cirrus.Worker.Maintenance;
 
 namespace MTSM.Cirrus.Worker;
 
 public sealed class Worker(
     StorageProcessingProcessor storageProcessingProcessor,
+    StoragePackingProcessor storagePackingProcessor,
+    PackMaintenanceProcessor packMaintenanceProcessor,
     IntegrityCheckProcessor integrityProcessor,
     PurgeProcessor purgeProcessor,
     IOptions<StorageProcessingOptions> storageProcessingOptions,
@@ -53,6 +56,16 @@ public sealed class Worker(
                             workerInstanceId,
                             cancellationToken)
                         : 0;
+                int storagePackingClaimed =
+                    _storageProcessingOptions.Enabled
+                        ? await storagePackingProcessor.ProcessBatchAsync(
+                            workerInstanceId,
+                            cancellationToken)
+                        : 0;
+                int packsMaintained = _storageProcessingOptions.Enabled
+                    && _storageProcessingOptions.PackMaintenanceEnabled
+                    ? await packMaintenanceProcessor.ProcessBatchAsync(workerInstanceId, cancellationToken)
+                    : 0;
                 int integrityClaimed = _integrityOptions.Enabled
                     ? await integrityProcessor.ProcessBatchAsync(workerInstanceId, cancellationToken)
                     : 0;
@@ -62,6 +75,9 @@ public sealed class Worker(
 
                 if (storageProcessingClaimed
                         < _storageProcessingOptions.BatchSize
+                    && storagePackingClaimed
+                        < _storageProcessingOptions.BatchSize
+                    && packsMaintained < _storageProcessingOptions.PackMaintenanceBatchSize
                     && integrityClaimed < _integrityOptions.BatchSize
                     && purgeClaimed < _purgeOptions.BatchSize)
                 {

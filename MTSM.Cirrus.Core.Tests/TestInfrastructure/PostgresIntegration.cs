@@ -54,6 +54,18 @@ internal sealed class PostgresFactAttribute : FactAttribute
     }
 }
 
+internal sealed class PostgresAndS3FactAttribute : FactAttribute
+{
+    public PostgresAndS3FactAttribute()
+    {
+        if (PostgresTestConfiguration.TryGetConnectionString() is null
+            || S3TestConfiguration.TryGetOptions() is null)
+        {
+            Skip = "Set the CIRRUS_TEST_POSTGRES and CIRRUS_TEST_S3_* variables to run the full storage integration test.";
+        }
+    }
+}
+
 [CollectionDefinition(Name, DisableParallelization = true)]
 public sealed class PostgresCollection : ICollectionFixture<PostgresFixture>
 {

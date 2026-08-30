@@ -8,6 +8,15 @@ namespace MTSM.Cirrus.Core.Tests;
 public sealed class S3ObjectStorageContractTests
 {
     [Fact]
+    public async Task OpenReadRangeAsync_RejectsInvalidRangeBeforeNetworkAccess()
+    {
+        using S3ObjectStorage storage = CreateStorage();
+        await Assert.ThrowsAsync<ArgumentOutOfRangeException>(() =>
+            storage.OpenReadRangeAsync("bucket", "object", -1, 1));
+        await Assert.ThrowsAsync<ArgumentOutOfRangeException>(() =>
+            storage.OpenReadRangeAsync("bucket", "object", 0, 0));
+    }
+    [Fact]
     public async Task WriteAsync_RejectsInvalidLocationBeforeNetworkAccess()
     {
         using S3ObjectStorage storage = CreateStorage();

@@ -168,14 +168,22 @@ public sealed class PurgeProcessor(
                 return;
             }
 
-            ObjectStorageDeleteOutcome outcome = await storage.DeleteAsync(
-                item.BucketName,
-                item.StagingObjectKey
-                    ?? item.ObjectKey
-                    ?? throw new InvalidOperationException(
-                        $"Archive object {item.ArchiveObjectId} has no storage object key."),
-                item.StorageVersionId,
-                cancellationToken);
+            ObjectStorageDeleteOutcome outcome;
+            if (item.ContentManifestId is not null)
+            {
+                outcome = ObjectStorageDeleteOutcome.DeferredToGarbageCollection;
+            }
+            else
+            {
+                outcome = await storage.DeleteAsync(
+                    item.BucketName,
+                    item.StagingObjectKey
+                        ?? item.ObjectKey
+                        ?? throw new InvalidOperationException(
+                            $"Archive object {item.ArchiveObjectId} has no storage object key."),
+                    item.StorageVersionId,
+                    cancellationToken);
+            }
 
             await CompleteAsync(
                 archiveObjectId,
@@ -252,6 +260,9 @@ public sealed class PurgeProcessor(
         item.NextIntegrityCheckAt = null;
         item.IntegrityCheckLeaseOwner = null;
         item.IntegrityCheckLeaseUntil = null;
+        // The archive is the reachability root. Shared chunks remain alive through
+        // other manifests; pack maintenance removes only content that lost its last root.
+        item.ContentManifestId = null;
 
         foreach (ArchiveErrorQueueItem error in item.Errors.Where(error =>
                      error.ErrorType == PurgeErrorType && !error.Resolved))

@@ -24,6 +24,13 @@ public interface IObjectStorage
         string objectKey,
         CancellationToken cancellationToken = default);
 
+    Task<Stream> OpenReadRangeAsync(
+        string bucketName,
+        string objectKey,
+        long offset,
+        long length,
+        CancellationToken cancellationToken = default);
+
     Task<bool> ExistsAsync(
         string bucketName,
         string objectKey,

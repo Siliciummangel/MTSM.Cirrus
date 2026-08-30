@@ -79,6 +79,7 @@ public static class DependencyInjection
             .ValidateOnStart();
 
         services.AddSingleton<IObjectStorage, S3ObjectStorage>();
+        services.AddScoped<IManifestContentReader, ManifestContentReader>();
         services.AddScoped<IArchiveService, ArchiveService>();
 
         return services;

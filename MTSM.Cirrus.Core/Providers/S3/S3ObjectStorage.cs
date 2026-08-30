@@ -348,6 +348,54 @@ public sealed class S3ObjectStorage : IObjectStorage, IDisposable
         }
     }
 
+    public async Task<Stream> OpenReadRangeAsync(
+        string bucketName,
+        string objectKey,
+        long offset,
+        long length,
+        CancellationToken cancellationToken = default)
+    {
+        ThrowIfDisposed();
+        ValidateLocation(bucketName, objectKey);
+        ArgumentOutOfRangeException.ThrowIfNegative(offset);
+        ArgumentOutOfRangeException.ThrowIfNegativeOrZero(length);
+
+        long end = checked(offset + length - 1);
+
+        try
+        {
+            GetObjectResponse response = await _s3Client.GetObjectAsync(
+                new GetObjectRequest
+                {
+                    BucketName = bucketName,
+                    Key = objectKey,
+                    ByteRange = new ByteRange(offset, end)
+                },
+                cancellationToken);
+
+            if (response.ResponseStream is null)
+            {
+                response.Dispose();
+                throw new ObjectStorageException(
+                    "Object storage returned no range response stream.");
+            }
+
+            return response.ResponseStream;
+        }
+        catch (AmazonS3Exception exception)
+            when (!cancellationToken.IsCancellationRequested)
+        {
+            LogS3Failure("range read", exception);
+            throw CreateStorageException("range read", exception);
+        }
+        catch (Exception exception)
+            when (!cancellationToken.IsCancellationRequested)
+        {
+            LogUnexpectedStorageFailure("range read", exception);
+            throw CreateStorageException("range read", exception);
+        }
+    }
+
     public async Task<ObjectStorageDeleteOutcome> DeleteAsync(
         string bucketName,
         string objectKey,

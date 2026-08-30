@@ -28,15 +28,18 @@ public sealed class ArchiveService : IArchiveService
 
     private readonly CirrusDbContext _dbContext;
     private readonly IObjectStorage _objectStorage;
+    private readonly IManifestContentReader _manifestContentReader;
     private readonly ILogger<ArchiveService> _logger;
 
     public ArchiveService(
         CirrusDbContext dbContext,
         IObjectStorage objectStorage,
+        IManifestContentReader manifestContentReader,
         ILogger<ArchiveService> logger)
     {
         _dbContext = dbContext;
         _objectStorage = objectStorage;
+        _manifestContentReader = manifestContentReader;
         _logger = logger;
     }
 
@@ -272,10 +275,13 @@ public sealed class ArchiveService : IArchiveService
 
         try
         {
-            content = await _objectStorage.OpenReadAsync(
-                archiveObject.BucketName,
-                GetCurrentStorageObjectKey(archiveObject),
-                cancellationToken);
+            content = archiveObject.ContentManifestId is long manifestId
+                && archiveObject.StorageProcessingStatus == StorageProcessingStatus.Completed
+                ? await _manifestContentReader.OpenReadAsync(manifestId, cancellationToken)
+                : await _objectStorage.OpenReadAsync(
+                    archiveObject.BucketName,
+                    GetCurrentStorageObjectKey(archiveObject),
+                    cancellationToken);
         }
         catch (OperationCanceledException)
             when (cancellationToken.IsCancellationRequested)
@@ -289,7 +295,7 @@ public sealed class ArchiveService : IArchiveService
                 "at {BucketName}/{ObjectKey} with error type {StorageErrorType}.",
                 archiveObjectId,
                 archiveObject.BucketName,
-                GetCurrentStorageObjectKey(archiveObject),
+                GetStorageDiagnosticLocation(archiveObject),
                 exception.GetType().Name);
 
             throw new ArchiveException(
@@ -520,10 +526,13 @@ public sealed class ArchiveService : IArchiveService
 
         try
         {
-            content = await _objectStorage.OpenReadAsync(
-                archiveObject.BucketName,
-                GetCurrentStorageObjectKey(archiveObject),
-                cancellationToken);
+            content = archiveObject.ContentManifestId is long manifestId
+                && archiveObject.StorageProcessingStatus == StorageProcessingStatus.Completed
+                ? await _manifestContentReader.OpenReadAsync(manifestId, cancellationToken)
+                : await _objectStorage.OpenReadAsync(
+                    archiveObject.BucketName,
+                    GetCurrentStorageObjectKey(archiveObject),
+                    cancellationToken);
         }
         catch (OperationCanceledException)
             when (cancellationToken.IsCancellationRequested)
@@ -537,7 +546,7 @@ public sealed class ArchiveService : IArchiveService
                 "failed at {BucketName}/{ObjectKey} with error type {StorageErrorType}.",
                 archiveObjectId,
                 archiveObject.BucketName,
-                GetCurrentStorageObjectKey(archiveObject),
+                GetStorageDiagnosticLocation(archiveObject),
                 exception.GetType().Name);
 
             throw new ArchiveException(
@@ -602,7 +611,7 @@ public sealed class ArchiveService : IArchiveService
                     "failed at {BucketName}/{ObjectKey} with error type {StorageErrorType}.",
                     archiveObjectId,
                     archiveObject.BucketName,
-                    GetCurrentStorageObjectKey(archiveObject),
+                    GetStorageDiagnosticLocation(archiveObject),
                     exception.GetType().Name);
 
                 throw new ArchiveException(
@@ -1270,6 +1279,11 @@ public sealed class ArchiveService : IArchiveService
         ?? archiveObject.ObjectKey
         ?? throw new ArchiveException(
             $"Archive object {archiveObject.ArchiveObjectId} has no readable storage location.");
+
+    private static string GetStorageDiagnosticLocation(ArchiveObject archiveObject) =>
+        archiveObject.StagingObjectKey
+        ?? archiveObject.ObjectKey
+        ?? $"manifest:{archiveObject.ContentManifestId}";
 
     private async Task ValidateBusinessReferenceTypesAsync(
         IReadOnlyCollection<ArchiveBusinessReferenceInput> references,

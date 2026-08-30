@@ -8,6 +8,8 @@ public sealed class ArchiveObject
 
     public long TenantId { get; set; }
 
+    public long? ContentManifestId { get; set; }
+
     public string? ObjectKey { get; set; }
 
     public string? StagingObjectKey { get; set; }
@@ -87,6 +89,8 @@ public sealed class ArchiveObject
     public required string CreatedBy { get; set; }
 
     public Tenant Tenant { get; set; } = null!;
+
+    public ContentManifest? ContentManifest { get; set; }
 
     public RetentionPolicy? RetentionPolicy { get; set; }
 

@@ -34,6 +34,7 @@ internal static class CoreTestFactory
         return new ArchiveService(
             dbContext,
             storage,
+            new ManifestContentReader(dbContext, storage),
             NullLogger<ArchiveService>.Instance);
     }
 }

@@ -15,5 +15,6 @@ public enum ArchiveEventType
     Purged,
     PurgeFailed,
     StorageProcessingVerified,
-    StorageProcessingFailed
+    StorageProcessingFailed,
+    StorageProcessingCompleted
 }

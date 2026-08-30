@@ -1,5 +1,7 @@
 using MTSM.Cirrus.Core.Data;
 using MTSM.Cirrus.Worker;
+using MTSM.Cirrus.Worker.Maintenance;
+using MTSM.Cirrus.Worker.StorageV2;
 
 var builder = Host.CreateApplicationBuilder(args);
 
@@ -23,6 +25,23 @@ builder.Services
         "Maximum storage-processing retry delay must be positive.")
     .Validate(options => options.MaximumAttempts > 0,
         "Maximum storage-processing attempts must be positive.")
+    .Validate(options => options.MinimumChunkSizeBytes > 0
+        && options.AverageChunkSizeBytes >= options.MinimumChunkSizeBytes
+        && options.MaximumChunkSizeBytes >= options.AverageChunkSizeBytes,
+        "Storage-processing chunk sizes are invalid.")
+    .Validate(options => options.TargetPackSizeBytes >= options.MaximumChunkSizeBytes,
+        "Target pack size must be at least the maximum chunk size.")
+    .Validate(options => options.MaximumBatchWaitSeconds >= 0,
+        "Maximum batch wait must not be negative.")
+    .Validate(options => options.LeaseHeartbeatSeconds > 0
+        && options.LeaseHeartbeatSeconds < options.LeaseDurationMinutes * 60,
+        "Lease heartbeat must be positive and shorter than the lease duration.")
+    .Validate(options => options.ZstdCompressionLevel is >= -5 and <= 22,
+        "Zstd compression level must be between -5 and 22.")
+    .Validate(options => options.PackMaintenanceBatchSize is > 0 and <= 1000,
+        "Pack-maintenance batch size must be between 1 and 1000.")
+    .Validate(options => options.CompactionUtilizationPercent is > 0 and < 100,
+        "Compaction utilization must be between 1 and 99 percent.")
     .ValidateOnStart();
 
 builder.Services
@@ -86,6 +105,18 @@ string connectionString =
 builder.Services.AddCirrusDatabase(connectionString);
 builder.Services.AddCirrusCore(builder.Configuration);
 builder.Services.AddSingleton<StorageProcessingProcessor>();
+builder.Services.AddSingleton<IContentChunker, FastCdcContentChunker>();
+builder.Services.AddSingleton<StoragePackingLeaseManager>();
+builder.Services.AddSingleton<ManifestCommitter>();
+builder.Services.AddSingleton<PackWriter>();
+builder.Services.AddSingleton<ArchivePackPlanner>();
+builder.Services.AddSingleton<StagingFinalizer>();
+builder.Services.AddSingleton<StoragePackingProcessor>();
+builder.Services.AddSingleton<PackMaintenanceProcessor>();
+builder.Services.AddSingleton<UnreachableContentCollector>();
+builder.Services.AddSingleton<PackGarbageCollector>();
+builder.Services.AddSingleton<PackMaintenanceLeaseManager>();
+builder.Services.AddSingleton<PackCompactor>();
 builder.Services.AddSingleton<IntegrityCheckProcessor>();
 builder.Services.AddSingleton<PurgeProcessor>();
 builder.Services.AddSingleton(TimeProvider.System);
