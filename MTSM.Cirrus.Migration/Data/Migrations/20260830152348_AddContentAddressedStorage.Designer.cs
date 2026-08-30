@@ -13,7 +13,7 @@ using Npgsql.EntityFrameworkCore.PostgreSQL.Metadata;
 namespace MTSM.Cirrus.Migration.Data.Migrations
 {
     [DbContext(typeof(CirrusDbContext))]
-    [Migration("20260830140430_AddContentAddressedStorage")]
+    [Migration("20260830152348_AddContentAddressedStorage")]
     partial class AddContentAddressedStorage
     {
         /// <inheritdoc />

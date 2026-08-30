@@ -72,6 +72,7 @@ public sealed class ArchiveObjectConfiguration
             .HasConversion<string>()
             .HasMaxLength(32)
             .HasDefaultValue(StorageProcessingStatus.Completed)
+            .HasSentinel((StorageProcessingStatus)(-1))
             .IsRequired();
 
         builder.Property(x => x.StorageProcessingLeaseOwner)
