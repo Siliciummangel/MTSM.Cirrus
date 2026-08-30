@@ -208,17 +208,18 @@ jobs:
               exit 1
               ;;
             worker)
-              docker run --detach --rm --name cirrus-worker-smoke --network host \
+              docker run --detach --name cirrus-worker-smoke --network host \
                 --env "ConnectionStrings__ArchiveDatabase=$database" \
                 --env S3__ServiceUrl=http://127.0.0.1:8333 \
                 --env S3__AccessKey=smoke-access \
                 --env S3__SecretKey=smoke-secret \
                 --env S3__Region=us-east-1 \
+                --env StorageProcessing__Enabled=false \
                 --env IntegrityChecks__Enabled=false \
                 --env Purge__Enabled=false \
                 "$image_ref"
 
-              trap 'docker logs cirrus-worker-smoke || true; docker stop cirrus-worker-smoke || true' EXIT
+              trap 'docker logs cirrus-worker-smoke || true; docker rm --force cirrus-worker-smoke || true' EXIT
               sleep 5
               test "$(docker inspect cirrus-worker-smoke --format '{{.State.Running}}')" = "true"
               ;;
