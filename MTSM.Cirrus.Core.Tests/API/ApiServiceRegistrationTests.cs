@@ -1,5 +1,6 @@
 using Microsoft.AspNetCore.Authentication;
 using Microsoft.AspNetCore.DataProtection;
+using Microsoft.AspNetCore.Http;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Options;
@@ -38,7 +39,18 @@ public sealed class ApiServiceRegistrationTests
             .GetRequiredService<IOptionsMonitor<ApiKeyOptions>>()
             .Get(ApiKeyOptions.Scheme);
 
+        await using AsyncServiceScope scope = provider.CreateAsyncScope();
+        var context = new DefaultHttpContext
+        {
+            RequestServices = scope.ServiceProvider
+        };
+        var handlers = scope.ServiceProvider
+            .GetRequiredService<IAuthenticationHandlerProvider>();
+        IAuthenticationHandler? handler = await handlers.GetHandlerAsync(
+            context, ApiKeyOptions.Scheme);
+
         Assert.Equal(ApiKeyOptions.Scheme, defaultScheme?.Name);
         Assert.NotNull(schemeOptions.TimeProvider);
+        Assert.IsType<ApiKeyAuthenticationHandler>(handler);
     }
 }

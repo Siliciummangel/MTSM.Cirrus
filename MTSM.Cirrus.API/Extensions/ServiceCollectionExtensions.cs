@@ -53,6 +53,7 @@ public static class ServiceCollectionExtensions
         services.AddAuthenticationCore(options =>
             options.DefaultScheme = ApiKeyOptions.Scheme);
         services.TryAddSingleton(TimeProvider.System);
+        services.AddWebEncoders();
         new AuthenticationBuilder(services)
             .AddScheme<ApiKeyOptions, ApiKeyAuthenticationHandler>(ApiKeyOptions.Scheme, _ => { });
 
