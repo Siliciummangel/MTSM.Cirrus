@@ -6,12 +6,14 @@ using MTSM.Cirrus.Core.Abstractions;
 using MTSM.Cirrus.Core.Config;
 using MTSM.Cirrus.Core.Exceptions;
 using MTSM.Cirrus.Core.Models;
+using System.Buffers;
 using System.Net;
 
 namespace MTSM.Cirrus.Core.Providers.S3;
 
 public sealed class S3ObjectStorage : IObjectStorage, IDisposable
 {
+    private const int MultipartPartSizeBytes = 5 * 1024 * 1024;
     private readonly IAmazonS3 _s3Client;
     private readonly S3Options _options;
     private readonly ILogger<S3ObjectStorage> _logger;
@@ -73,12 +75,24 @@ public sealed class S3ObjectStorage : IObjectStorage, IDisposable
 
         await EnsureBucketExistsAsync(bucketName, cancellationToken);
 
+        if (!content.CanSeek)
+        {
+            return await WriteMultipartAsync(
+                bucketName,
+                objectKey,
+                content,
+                normalizedContentType,
+                encryptionKeyId,
+                cancellationToken);
+        }
+
         var request = new PutObjectRequest
         {
             BucketName = bucketName,
             Key = objectKey,
             InputStream = content,
             AutoCloseStream = false,
+            AutoResetStreamPosition = false,
             UseChunkEncoding = _options.UseChunkEncoding,
             DisableDefaultChecksumValidation =
                 _options.DisableDefaultChecksumValidation,
@@ -345,6 +359,191 @@ public sealed class S3ObjectStorage : IObjectStorage, IDisposable
             throw new ObjectStorageException(
                 "Checking the object-storage bucket failed.",
                 exception);
+        }
+    }
+
+    private async Task<ObjectStorageWriteResult> WriteMultipartAsync(
+        string bucketName,
+        string objectKey,
+        Stream content,
+        string? contentType,
+        string? encryptionKeyId,
+        CancellationToken cancellationToken)
+    {
+        string? uploadId = null;
+        byte[] buffer = ArrayPool<byte>.Shared.Rent(MultipartPartSizeBytes);
+
+        try
+        {
+            var initiateRequest = new InitiateMultipartUploadRequest
+            {
+                BucketName = bucketName,
+                Key = objectKey,
+                ContentType = contentType ?? "application/octet-stream"
+            };
+
+            if (!string.IsNullOrWhiteSpace(encryptionKeyId))
+            {
+                initiateRequest.ServerSideEncryptionMethod =
+                    ServerSideEncryptionMethod.AWSKMS;
+                initiateRequest.ServerSideEncryptionKeyManagementServiceKeyId =
+                    encryptionKeyId.Trim();
+            }
+
+            InitiateMultipartUploadResponse initiated =
+                await _s3Client.InitiateMultipartUploadAsync(
+                    initiateRequest,
+                    cancellationToken);
+            uploadId = initiated.UploadId;
+
+            var partETags = new List<PartETag>();
+            int partNumber = 1;
+
+            while (true)
+            {
+                int length = await ReadPartAsync(
+                    content,
+                    buffer,
+                    cancellationToken);
+
+                if (length == 0)
+                {
+                    break;
+                }
+
+                using var partContent = new MemoryStream(
+                    buffer,
+                    0,
+                    length,
+                    writable: false,
+                    publiclyVisible: true);
+                var partRequest = new UploadPartRequest
+                {
+                    BucketName = bucketName,
+                    Key = objectKey,
+                    UploadId = uploadId,
+                    PartNumber = partNumber,
+                    PartSize = length,
+                    InputStream = partContent,
+                    UseChunkEncoding = false,
+                    DisableDefaultChecksumValidation =
+                        _options.DisableDefaultChecksumValidation
+                };
+
+                UploadPartResponse uploaded = await _s3Client.UploadPartAsync(
+                    partRequest,
+                    cancellationToken);
+                partETags.Add(new PartETag(partNumber, uploaded.ETag));
+                partNumber++;
+            }
+
+            if (partETags.Count == 0)
+            {
+                throw new ArgumentException(
+                    "The content stream must not be empty.",
+                    nameof(content));
+            }
+
+            CompleteMultipartUploadResponse completed =
+                await _s3Client.CompleteMultipartUploadAsync(
+                    new CompleteMultipartUploadRequest
+                    {
+                        BucketName = bucketName,
+                        Key = objectKey,
+                        UploadId = uploadId,
+                        PartETags = partETags
+                    },
+                    cancellationToken);
+
+            uploadId = null;
+
+            _logger.LogInformation(
+                "Stored an object in S3 bucket {BucketName} using multipart upload.",
+                bucketName);
+            _logger.LogDebug(
+                "Stored S3 object {BucketName}/{ObjectKey} with ETag {ETag} " +
+                "and version {VersionId}.",
+                bucketName,
+                objectKey,
+                NormalizeETag(completed.ETag),
+                NormalizeHeaderValue(completed.VersionId));
+
+            return new ObjectStorageWriteResult(
+                NormalizeHeaderValue(completed.VersionId),
+                NormalizeETag(completed.ETag));
+        }
+        catch (AmazonS3Exception exception)
+            when (!cancellationToken.IsCancellationRequested)
+        {
+            LogS3Failure("multipart write", exception);
+            throw CreateStorageException("multipart write", exception);
+        }
+        catch (Exception exception)
+            when (!cancellationToken.IsCancellationRequested)
+        {
+            LogUnexpectedStorageFailure("multipart write", exception);
+            throw CreateStorageException("multipart write", exception);
+        }
+        finally
+        {
+            ArrayPool<byte>.Shared.Return(buffer);
+
+            if (uploadId is not null)
+            {
+                await AbortMultipartUploadBestEffortAsync(
+                    bucketName,
+                    objectKey,
+                    uploadId);
+            }
+        }
+    }
+
+    private static async Task<int> ReadPartAsync(
+        Stream content,
+        byte[] buffer,
+        CancellationToken cancellationToken)
+    {
+        int totalRead = 0;
+
+        while (totalRead < MultipartPartSizeBytes)
+        {
+            int read = await content.ReadAsync(
+                buffer.AsMemory(totalRead, MultipartPartSizeBytes - totalRead),
+                cancellationToken);
+
+            if (read == 0)
+            {
+                break;
+            }
+
+            totalRead += read;
+        }
+
+        return totalRead;
+    }
+
+    private async Task AbortMultipartUploadBestEffortAsync(
+        string bucketName,
+        string objectKey,
+        string uploadId)
+    {
+        try
+        {
+            await _s3Client.AbortMultipartUploadAsync(
+                new AbortMultipartUploadRequest
+                {
+                    BucketName = bucketName,
+                    Key = objectKey,
+                    UploadId = uploadId
+                },
+                CancellationToken.None);
+        }
+        catch (Exception exception)
+        {
+            _logger.LogWarning(
+                exception,
+                "Aborting an incomplete multipart upload in bucket {BucketName} failed.",
+                bucketName);
         }
     }
 

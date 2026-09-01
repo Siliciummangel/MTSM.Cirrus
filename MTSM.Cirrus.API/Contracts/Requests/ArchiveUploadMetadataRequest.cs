@@ -1,38 +1,26 @@
-﻿using Microsoft.AspNetCore.Mvc;
 using System.ComponentModel.DataAnnotations;
 
 namespace MTSM.Cirrus.API.Contracts.Requests;
 
-public sealed class ArchiveUploadRequest
+public sealed class ArchiveUploadMetadataRequest
 {
     [Required]
-    [FromForm(Name = "file")]
-    public IFormFile File { get; init; } = null!;
-
-    [Required]
     [StringLength(100)]
-    [FromForm(Name = "fileType")]
     public string FileType { get; init; } = string.Empty;
 
     [Required]
     [StringLength(100)]
-    [FromForm(Name = "sourceSystem")]
     public string SourceSystem { get; init; } = string.Empty;
 
     [StringLength(200)]
-    [FromForm(Name = "partner")]
     public string? Partner { get; init; }
 
-    [FromForm(Name = "receivedAt")]
     public DateTimeOffset? ReceivedAt { get; init; }
 
-    [FromForm(Name = "retentionPolicyId")]
     public int? RetentionPolicyId { get; init; }
 
-    [FromForm(Name = "retentionUntil")]
     public DateOnly? RetentionUntil { get; init; }
 
-    [FromForm(Name = "businessReferences")]
     public List<ArchiveBusinessReferenceRequest> BusinessReferences { get; init; }
         = [];
 }

@@ -16,12 +16,32 @@ public sealed class ArchiveApiIntegrationTests
     public async Task ArchiveAsync_ValidMultipartRequestReturnsCreatedResource()
     {
         using var factory = new ApiTestFactory();
+        byte[]? uploadedContent = null;
+        factory.ArchiveService.ArchiveHandler = async (request, cancellationToken) =>
+        {
+            using var buffer = new MemoryStream();
+            await request.Content.CopyToAsync(buffer, cancellationToken);
+            uploadedContent = buffer.ToArray();
+            return new ArchiveFileResult(
+                42,
+                1,
+                "objects/42",
+                new string('a', 64),
+                uploadedContent.Length,
+                DateTimeOffset.Parse("2026-08-19T00:00:00Z"));
+        };
         using HttpClient client = factory.CreateClient();
         using var content = new MultipartFormDataContent
         {
-            { new ByteArrayContent("payload"u8.ToArray()), "file", "payload.txt" },
-            { new StringContent("document"), "fileType" },
-            { new StringContent("source-a"), "sourceSystem" }
+            {
+                JsonContent.Create(new
+                {
+                    fileType = "document",
+                    sourceSystem = "source-a"
+                }),
+                "metadata"
+            },
+            { new ByteArrayContent("payload"u8.ToArray()), "file", "payload.txt" }
         };
 
         HttpResponseMessage response = await client.PostAsync(
@@ -45,6 +65,65 @@ public sealed class ArchiveApiIntegrationTests
         Assert.False(body.RootElement.TryGetProperty("objectKey", out _));
         Assert.Equal("payload.txt", factory.ArchiveService.LastArchiveRequest?.OriginalFilename);
         Assert.Equal("source-a", factory.ArchiveService.LastArchiveRequest?.SourceSystem);
+        Assert.Equal("payload"u8.ToArray(), uploadedContent);
+        Assert.False(factory.ArchiveService.LastArchiveRequest?.Content.CanSeek);
+    }
+
+    [Fact]
+    public async Task ArchiveAsync_FileBeforeMetadataReturnsBadRequest()
+    {
+        using var factory = new ApiTestFactory();
+        using HttpClient client = factory.CreateClient();
+        using var content = new MultipartFormDataContent
+        {
+            { new ByteArrayContent("payload"u8.ToArray()), "file", "payload.txt" },
+            {
+                JsonContent.Create(new
+                {
+                    fileType = "document",
+                    sourceSystem = "source-a"
+                }),
+                "metadata"
+            }
+        };
+
+        HttpResponseMessage response = await client.PostAsync(
+            "/api/tenants/1/archive",
+            content);
+
+        ProblemDetails problem = await AssertProblemAsync(
+            response,
+            HttpStatusCode.BadRequest,
+            "Invalid request",
+            "/api/tenants/1/archive");
+        Assert.Contains("metadata section must precede", problem.Detail);
+        Assert.Null(factory.ArchiveService.LastArchiveRequest);
+    }
+
+    [Fact]
+    public async Task ArchiveAsync_EmptyFileReturnsValidationProblem()
+    {
+        using var factory = new ApiTestFactory();
+        using HttpClient client = factory.CreateClient();
+        using var content = new MultipartFormDataContent
+        {
+            {
+                JsonContent.Create(new
+                {
+                    fileType = "document",
+                    sourceSystem = "source-a"
+                }),
+                "metadata"
+            },
+            { new ByteArrayContent([]), "file", "empty.txt" }
+        };
+
+        HttpResponseMessage response = await client.PostAsync(
+            "/api/tenants/1/archive",
+            content);
+
+        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+        Assert.Null(factory.ArchiveService.LastArchiveRequest);
     }
 
     [Fact]

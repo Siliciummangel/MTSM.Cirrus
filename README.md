@@ -532,7 +532,8 @@ The API currently uses three main configuration sections:
     "DisableDefaultChecksumValidation": true
   },
   "Api": {
-    "MaxMultipartUploadSizeBytes": 1073741824
+    "MaxMultipartUploadSizeBytes": 1073741824,
+    "MaxUploadMetadataSizeBytes": 65536
   }
 }
 ```
@@ -681,12 +682,13 @@ These compatibility switches should only be enabled when required by the selecte
 
 ### API configuration
 
-The maximum multipart upload request size is configured in bytes:
+The multipart request and JSON metadata limits are configured in bytes:
 
 ```json
 {
   "Api": {
-    "MaxMultipartUploadSizeBytes": 1073741824
+    "MaxMultipartUploadSizeBytes": 1073741824,
+    "MaxUploadMetadataSizeBytes": 65536
   }
 }
 ```
@@ -701,6 +703,7 @@ Equivalent environment variable:
 
 ```bash
 Api__MaxMultipartUploadSizeBytes="1073741824"
+Api__MaxUploadMetadataSizeBytes="65536"
 ```
 
 This limit applies to the complete multipart request, not only to the raw file content.
@@ -789,6 +792,7 @@ export S3__UseChunkEncoding="false"
 export S3__DisableDefaultChecksumValidation="true"
 
 export Api__MaxMultipartUploadSizeBytes="1073741824"
+export Api__MaxUploadMetadataSizeBytes="65536"
 
 export IntegrityChecks__InitialVerificationDelayHours="24"
 export IntegrityChecks__ReverificationIntervalDays="180"
@@ -1051,32 +1055,44 @@ Example:
 curl --request POST \
   --header "Authorization: ApiKey ${CIRRUS_API_KEY}" \
   "${BASE_URL}/api/tenants/1/archive" \
-  --form "file=@./example.pdf;type=application/pdf" \
-  --form "fileType=invoice" \
-  --form "sourceSystem=example-application" \
-  --form "partner=example-partner" \
-  --form "receivedAt=2026-07-27T18:30:00Z" \
-  --form "retentionUntil=2036-07-27"
+  --form 'metadata={"fileType":"invoice","sourceSystem":"example-application","partner":"example-partner","receivedAt":"2026-07-27T18:30:00Z","retentionUntil":"2036-07-27"};type=application/json' \
+  --form "file=@./example.pdf;type=application/pdf"
 ```
+
+The multipart sections are ordered and have the following contract:
+
+1. `metadata` must be the first section and must have content type
+   `application/json`. Its default maximum size is 64 KiB and can be changed
+   with `Api__MaxUploadMetadataSizeBytes`.
+2. `file` must be the second and final section. Its filename and content type
+   are taken from the section headers.
+
+Cirrus reads the small metadata section into memory and streams the file section
+directly to object storage. It does not buffer uploaded files in the API
+container's temporary directory. Clients must therefore send metadata before the
+file. For a non-seekable request stream, the S3 adapter uses multipart upload with
+one bounded 5 MiB in-memory buffer per active upload. This also works when S3
+chunk encoding is disabled.
 
 Required fields:
 
 | Field | Type | Description |
 |---|---|---|
-| `file` | File | File content to archive |
-| `fileType` | String | Technical or business file type |
-| `sourceSystem` | String | Application that submitted the file |
+| `metadata` | JSON | Archive metadata; must be the first multipart section |
+| `file` | File | File content to archive; must be the final multipart section |
+| `metadata.fileType` | String | Technical or business file type |
+| `metadata.sourceSystem` | String | Application that submitted the file |
 | `tenantId` | Route | Positive 64-bit identity of the tenant owning the archive object |
 
 Optional fields:
 
 | Field | Type | Description |
 |---|---|---|
-| `partner` | String | Optional partner identifier |
-| `receivedAt` | Date and time | Time at which the source system received the file |
-| `retentionPolicyId` | Integer | Optional reference to a retention policy |
-| `retentionUntil` | Date | Explicit retention date |
-| `businessReferences` | Collection | Structured business references |
+| `metadata.partner` | String | Optional partner identifier |
+| `metadata.receivedAt` | Date and time | Time at which the source system received the file |
+| `metadata.retentionPolicyId` | Integer | Optional reference to a retention policy |
+| `metadata.retentionUntil` | Date | Explicit retention date |
+| `metadata.businessReferences` | Collection | Structured business references |
 
 When `receivedAt` is omitted, the API uses the current UTC time.
 

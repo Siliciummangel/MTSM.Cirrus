@@ -6,6 +6,8 @@ using MTSM.Cirrus.API.Security;
 using MTSM.Cirrus.Core.Abstractions;
 using MTSM.Cirrus.Core.Models;
 using Microsoft.AspNetCore.Authorization;
+using MTSM.Cirrus.API.Filters;
+using MTSM.Cirrus.API.Uploads;
 
 namespace MTSM.Cirrus.API.Controllers;
 
@@ -15,17 +17,20 @@ namespace MTSM.Cirrus.API.Controllers;
 public sealed class ArchiveController : ControllerBase
 {
     private readonly IArchiveService _archiveService;
+    private readonly IArchiveUploadReader _uploadReader;
     private readonly ICirrusIdentityAccessor _identityAccessor;
     private readonly ILogger<ArchiveController> _logger;
 
     public ArchiveController(
         IArchiveService archiveService,
         ICirrusIdentityAccessor identityAccessor,
-        ILogger<ArchiveController> logger)
+        ILogger<ArchiveController> logger,
+        IArchiveUploadReader uploadReader)
     {
         _archiveService = archiveService;
         _identityAccessor = identityAccessor;
         _logger = logger;
+        _uploadReader = uploadReader;
     }
 
     /// <summary>
@@ -33,6 +38,7 @@ public sealed class ArchiveController : ControllerBase
     /// </summary>
     [HttpPost]
     [Authorize(Policy = CirrusAuthorizationPolicies.Write)]
+    [DisableFormValueModelBinding]
     [Consumes("multipart/form-data")]
     [ProducesResponseType<ArchiveFileResponse>(
         StatusCodes.Status201Created)]
@@ -44,15 +50,15 @@ public sealed class ArchiveController : ControllerBase
         StatusCodes.Status500InternalServerError)]
     public async Task<ActionResult<ArchiveFileResponse>> ArchiveAsync(
         [FromRoute] long tenantId,
-        [FromForm] ArchiveUploadRequest request,
         CancellationToken cancellationToken)
     {
-        if (request.File.Length <= 0)
-        {
-            ModelState.AddModelError(
-                nameof(request.File),
-                "The uploaded file must not be empty.");
+        ArchiveUpload upload = await _uploadReader.ReadAsync(
+            Request,
+            cancellationToken);
+        ArchiveUploadMetadataRequest request = upload.Metadata;
 
+        if (!TryValidateModel(request, nameof(request)))
+        {
             return ValidationProblem(ModelState);
         }
 
@@ -70,7 +76,7 @@ public sealed class ArchiveController : ControllerBase
                 .ToArray();
 
         await using Stream content =
-            request.File.OpenReadStream();
+            upload.Content;
 
         var archiveRequest =
             new MTSM.Cirrus.Core.Models.ArchiveFileRequest
@@ -78,15 +84,14 @@ public sealed class ArchiveController : ControllerBase
                 Content = content,
 
                 OriginalFilename =
-                    GetSafeOriginalFilename(
-                        request.File.FileName),
+                    upload.OriginalFilename,
 
                 FileType =
                     request.FileType.Trim(),
 
                 MimeType =
                     NormalizeOptionalValue(
-                        request.File.ContentType),
+                        upload.ContentType),
 
                 SourceSystem =
                     request.SourceSystem.Trim(),
@@ -458,22 +463,6 @@ public sealed class ArchiveController : ControllerBase
         }
 
         return Ok();
-    }
-
-    private static string GetSafeOriginalFilename(
-        string filename)
-    {
-        string safeFilename =
-            Path.GetFileName(filename);
-
-        if (string.IsNullOrWhiteSpace(safeFilename))
-        {
-            throw new ArgumentException(
-                "The uploaded file has no valid filename.",
-                nameof(filename));
-        }
-
-        return safeFilename;
     }
 
     private static string? NormalizeOptionalValue(
