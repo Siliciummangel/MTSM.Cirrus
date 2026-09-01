@@ -5,6 +5,7 @@ using Microsoft.Extensions.DependencyInjection.Extensions;
 using Microsoft.Extensions.Options;
 using MTSM.Cirrus.API.Config;
 using MTSM.Cirrus.API.Security;
+using MTSM.Cirrus.API.Uploads;
 using MTSM.Cirrus.Core.Data;
 using MTSM.Cirrus.Core.Security;
 using System.Text.Json.Serialization;
@@ -32,6 +33,9 @@ public static class ServiceCollectionExtensions
                 options =>
                     options.MaxMultipartUploadSizeBytes > 0,
                 "The maximum upload size must be greater than zero.")
+            .Validate(
+                options => options.MaxUploadMetadataSizeBytes > 0,
+                "The maximum upload metadata size must be greater than zero.")
             .Validate(options => options.RateLimitPermitCount > 0,
                 "The rate limit permit count must be greater than zero.")
             .Validate(options => options.RateLimitWindowSeconds > 0,
@@ -49,6 +53,7 @@ public static class ServiceCollectionExtensions
         services.AddHttpContextAccessor();
         services.AddScoped<ICirrusIdentityAccessor, HttpCirrusIdentityAccessor>();
         services.AddScoped<TenantBoundaryFilter>();
+        services.AddScoped<IArchiveUploadReader, ArchiveUploadReader>();
 
         services.AddAuthenticationCore(options =>
             options.DefaultScheme = ApiKeyOptions.Scheme);

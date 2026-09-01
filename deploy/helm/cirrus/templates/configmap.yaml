@@ -12,6 +12,7 @@ data:
   S3__UseChunkEncoding: {{ .Values.config.s3UseChunkEncoding | quote }}
   S3__DisableDefaultChecksumValidation: {{ .Values.config.s3DisableDefaultChecksumValidation | quote }}
   Api__MaxMultipartUploadSizeBytes: {{ .Values.config.maxMultipartUploadSizeBytes | quote }}
+  Api__MaxUploadMetadataSizeBytes: {{ .Values.config.maxUploadMetadataSizeBytes | quote }}
   Api__RateLimitPermitCount: {{ .Values.config.rateLimitPermitCount | quote }}
   Api__RateLimitWindowSeconds: {{ .Values.config.rateLimitWindowSeconds | quote }}
   AllowedHosts: {{ .Values.config.allowedHosts | quote }}

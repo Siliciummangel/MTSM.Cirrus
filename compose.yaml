@@ -78,6 +78,7 @@ services:
       ASPNETCORE_ENVIRONMENT: Development
       ASPNETCORE_HTTP_PORTS: "8080"
       Api__MaxMultipartUploadSizeBytes: ${CIRRUS_API_MAX_MULTIPART_UPLOAD_SIZE_BYTES}
+      Api__MaxUploadMetadataSizeBytes: ${CIRRUS_API_MAX_UPLOAD_METADATA_SIZE_BYTES}
       Api__RateLimitPermitCount: ${CIRRUS_API_RATE_LIMIT_PERMIT_COUNT}
       Api__RateLimitWindowSeconds: ${CIRRUS_API_RATE_LIMIT_WINDOW_SECONDS}
       AllowedHosts: ${CIRRUS_ALLOWED_HOSTS}

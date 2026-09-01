@@ -37,6 +37,7 @@ config:
   s3UseChunkEncoding: "true"
   s3DisableDefaultChecksumValidation: "false"
   maxMultipartUploadSizeBytes: "1073741824"
+  maxUploadMetadataSizeBytes: "65536"
   rateLimitPermitCount: "300"
   rateLimitWindowSeconds: "60"
   integrityChecksEnabled: "true"
