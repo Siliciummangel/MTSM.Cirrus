@@ -114,7 +114,88 @@ public sealed class PackMaintenanceProcessorIntegrationTests(PostgresFixture fix
                 NullLogger<PackMaintenanceLeaseManager>.Instance),
             new PackCompactor(scopes, options, clock), NullLogger<PackMaintenanceProcessor>.Instance);
     }
-    private ServiceProvider CreateProvider(InMemoryObjectStorage storage)
+    [PostgresFact]
+    public Task CompactAsync_UploadFailure_AbortsAndKeepsOldLocations() => AssertFailedCompactionAsync("upload");
+
+    [PostgresFact]
+    public Task CompactAsync_Cancellation_AbortsAndKeepsOldLocations() => AssertFailedCompactionAsync("cancel");
+
+    [PostgresFact]
+    public Task CompactAsync_CorruptSource_AbortsAndKeepsOldLocations() => AssertFailedCompactionAsync("corrupt");
+
+    private async Task AssertFailedCompactionAsync(string failure)
+    {
+        const int chunkLength = 6 * 1024 * 1024;
+        const string oldKey = "objects/tenant-a/packs/v1/compaction-failure";
+        byte[] source = new byte[2 * chunkLength];
+        new Random(7).NextBytes(source);
+        var oldStorage = new InMemoryObjectStorage();
+        oldStorage.Replace("cirrus-test", oldKey, source);
+        StoragePack pack;
+        await using (CirrusDbContext db = CreateDbContext())
+        {
+            pack = new StoragePack
+            {
+                TenantId = 1, BucketName = "cirrus-test", ObjectKey = oldKey,
+                HashAlgorithm = "SHA-256", PackHash = Convert.ToHexString(SHA256.HashData(source)).ToLowerInvariant(),
+                SizeBytes = source.Length, PackStatus = PackStatus.Committed, CreatedAt = Now.AddHours(-2),
+                UploadedAt = Now.AddHours(-2), CommittedAt = Now.AddHours(-2),
+                MaintenanceLeaseOwner = "compaction-failure", MaintenanceLeaseUntil = Now.AddMinutes(3)
+            };
+            db.StoragePacks.Add(pack);
+            for (int i = 0; i < 2; i++)
+            {
+                var chunk = new ContentChunk
+                {
+                    TenantId = 1, HashAlgorithm = "SHA-256", RawSizeBytes = chunkLength, CreatedAt = Now,
+                    ChunkHash = Convert.ToHexString(SHA256.HashData(source.AsSpan(i * chunkLength, chunkLength))).ToLowerInvariant()
+                };
+                db.StorageLocations.Add(new StorageLocation
+                {
+                    ContentChunk = chunk, StoragePack = pack, PackOffset = i * chunkLength,
+                    StoredLength = chunkLength, RawLength = chunkLength, CompressionAlgorithm = "None",
+                    CompressionVersion = 0, StorageFormatVersion = 1, CreatedAt = Now
+                });
+            }
+            await db.SaveChangesAsync();
+        }
+        if (failure == "corrupt") source[chunkLength] ^= 0xff;
+        using var cancellation = new CancellationTokenSource();
+        using var client = new RecordingS3Client
+        {
+            BeforePartAsync = (request, token) =>
+            {
+                if (request.PartNumber == 2 && failure == "upload") throw new IOException("Upload failed.");
+                if (request.PartNumber == 2 && failure == "cancel") cancellation.Cancel();
+                token.ThrowIfCancellationRequested();
+                return Task.CompletedTask;
+            }
+        };
+        using var storage = client.CreateStorage();
+        await using ServiceProvider provider = CreateProvider(new PackUploadObjectStorage(oldStorage, storage));
+        var compactor = new PackCompactor(provider.GetRequiredService<IServiceScopeFactory>(),
+            Options.Create(new StorageProcessingOptions { TargetPackSizeBytes = 16 * 1024 * 1024 }), new TestTimeProvider(Now));
+
+        Exception? exception = await Record.ExceptionAsync(() =>
+            compactor.CompactAsync([pack], "compaction-failure", cancellation.Token).WaitAsync(TimeSpan.FromSeconds(20)));
+        Assert.NotNull(exception);
+        Assert.IsNotType<TimeoutException>(exception);
+        if (failure == "cancel") Assert.IsAssignableFrom<OperationCanceledException>(exception);
+        Assert.Equal(1, client.Aborted);
+        Assert.Equal(0, client.Completed);
+        Assert.False(client.AbortTokenWasCancelled);
+        await using CirrusDbContext check = CreateDbContext();
+        StoragePack remaining = Assert.Single(await check.StoragePacks.ToArrayAsync());
+        Assert.Equal(pack.StoragePackId, remaining.StoragePackId);
+        Assert.Equal(PackStatus.Committed, remaining.PackStatus);
+        StorageLocation[] locations = await check.StorageLocations.OrderBy(x => x.PackOffset).ToArrayAsync();
+        Assert.Equal(2, locations.Length);
+        Assert.All(locations, x => Assert.Equal(pack.StoragePackId, x.StoragePackId));
+        Assert.Equal(new long[] { 0, chunkLength }, locations.Select(x => x.PackOffset));
+        Assert.True(await oldStorage.ExistsAsync(pack.BucketName, pack.ObjectKey));
+    }
+
+    private ServiceProvider CreateProvider(IObjectStorage storage)
     {
         var services = new ServiceCollection();
         services.AddScoped(_ => CreateDbContext());

@@ -32,29 +32,34 @@ public sealed class PackCompactor(
         var moved = new List<MovedPackLocation>();
         var pending = new List<(StorageLocation Source, PackEntry Entry)>();
         var newPackIds = new List<long>();
-        TemporaryPackBuilder? builder = null;
+        StreamingPackWriter? builder = null;
+        string? key = null;
+
+        StreamingPackWriter StartPack()
+        {
+            string prefix = oldPacks[0].ObjectKey.Split("/packs/", StringSplitOptions.None)[0];
+            key = $"{prefix}/packs/v1/{timeProvider.GetUtcNow():yyyy/MM/dd}/{Guid.NewGuid():N}";
+            return new StreamingPackWriter(storage, oldPacks[0].BucketName, key, cancellationToken);
+        }
 
         async Task FlushAsync()
         {
             if (builder is null || builder.Length == 0) return;
-            await using TemporaryPackBuilder current = builder;
+            await using StreamingPackWriter current = builder;
             builder = null;
-            SealedPack sealedPack = await current.SealAsync(cancellationToken);
+            UploadedPackContent uploaded = await current.CompleteAsync(cancellationToken);
             DateTimeOffset now = timeProvider.GetUtcNow();
-            string prefix = oldPacks[0].ObjectKey.Split("/packs/", StringSplitOptions.None)[0];
-            string key = $"{prefix}/packs/v1/{now:yyyy/MM/dd}/{Guid.NewGuid():N}";
-            ObjectStorageWriteResult write = await storage.WriteAsync(oldPacks[0].BucketName, key,
-                sealedPack.Content, "application/vnd.mtsm.cirrus.pack", null, cancellationToken);
+            ObjectStorageWriteResult write = uploaded.Write;
             var pack = new StoragePack
             {
                 TenantId = oldPacks[0].TenantId,
                 BucketName = oldPacks[0].BucketName,
-                ObjectKey = key,
+                ObjectKey = key!,
                 StorageVersionId = write.VersionId ?? write.ETag,
                 PackFormatVersion = 1,
                 HashAlgorithm = "SHA-256",
-                PackHash = sealedPack.Sha256Hash,
-                SizeBytes = sealedPack.Length,
+                PackHash = uploaded.Sha256Hash,
+                SizeBytes = uploaded.Length,
                 PackStatus = PackStatus.Uploaded,
                 CreatedAt = now,
                 UploadedAt = now
@@ -66,21 +71,28 @@ public sealed class PackCompactor(
             pending.Clear();
         }
 
-        foreach (StorageLocation location in locations)
+        try
         {
-            builder ??= new TemporaryPackBuilder();
-            if (builder.Length > 0 && builder.Length + location.StoredLength > _options.TargetPackSizeBytes)
-            { await FlushAsync(); builder = new TemporaryPackBuilder(); }
-            await using Stream range = await storage.OpenReadRangeAsync(location.StoragePack.BucketName,
-                location.StoragePack.ObjectKey, location.PackOffset, location.StoredLength, cancellationToken);
-            byte[] stored = new byte[location.StoredLength];
-            await range.ReadExactlyAsync(stored, cancellationToken);
-            Verify(location, stored);
-            PackEntry entry = await builder.AppendAsync(stored, location.RawLength, cancellationToken);
-            pending.Add((location, entry));
+            foreach (StorageLocation location in locations)
+            {
+                builder ??= StartPack();
+                if (builder.Length > 0 && builder.Length + location.StoredLength > _options.TargetPackSizeBytes)
+                { await FlushAsync(); builder = StartPack(); }
+                await using Stream range = await storage.OpenReadRangeAsync(location.StoragePack.BucketName,
+                    location.StoragePack.ObjectKey, location.PackOffset, location.StoredLength, cancellationToken);
+                byte[] stored = new byte[location.StoredLength];
+                await range.ReadExactlyAsync(stored, cancellationToken);
+                Verify(location, stored);
+                PackEntry entry = await builder.AppendAsync(stored, location.RawLength, cancellationToken);
+                pending.Add((location, entry));
+            }
+            await FlushAsync();
+            await SwapLocationsAsync(db, oldIds, newPackIds, moved, lease, cancellationToken);
         }
-        await FlushAsync();
-        await SwapLocationsAsync(db, oldIds, newPackIds, moved, lease, cancellationToken);
+        finally
+        {
+            if (builder is not null) await builder.DisposeAsync();
+        }
     }
 
     private async Task SwapLocationsAsync(CirrusDbContext db, long[] oldIds, List<long> newPackIds,

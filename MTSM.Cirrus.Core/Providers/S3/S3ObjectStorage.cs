@@ -24,22 +24,31 @@ public sealed class S3ObjectStorage : IObjectStorage, IDisposable
     public S3ObjectStorage(
         IOptions<S3Options> options,
         ILogger<S3ObjectStorage> logger)
+        : this(options, logger, CreateClient(options.Value))
+    {
+    }
+
+    internal S3ObjectStorage(IOptions<S3Options> options, ILogger<S3ObjectStorage> logger, IAmazonS3 client)
     {
         _options = options.Value;
         _logger = logger;
+        _s3Client = client;
+    }
 
+    private static AmazonS3Client CreateClient(S3Options options)
+    {
         var credentials = new Amazon.Runtime.BasicAWSCredentials(
-            _options.AccessKey,
-            _options.SecretKey);
+            options.AccessKey,
+            options.SecretKey);
 
         var configuration = new AmazonS3Config
         {
-            ServiceURL = _options.ServiceUrl.TrimEnd('/'),
-            ForcePathStyle = _options.ForcePathStyle,
-            AuthenticationRegion = _options.Region
+            ServiceURL = options.ServiceUrl.TrimEnd('/'),
+            ForcePathStyle = options.ForcePathStyle,
+            AuthenticationRegion = options.Region
         };
 
-        _s3Client = new AmazonS3Client(credentials, configuration);
+        return new AmazonS3Client(credentials, configuration);
     }
 
     public async Task<ObjectStorageWriteResult> WriteAsync(
@@ -529,6 +538,7 @@ public sealed class S3ObjectStorage : IObjectStorage, IDisposable
     {
         try
         {
+            using var cleanup = new CancellationTokenSource(TimeSpan.FromSeconds(30));
             await _s3Client.AbortMultipartUploadAsync(
                 new AbortMultipartUploadRequest
                 {
@@ -536,7 +546,7 @@ public sealed class S3ObjectStorage : IObjectStorage, IDisposable
                     Key = objectKey,
                     UploadId = uploadId
                 },
-                CancellationToken.None);
+                cleanup.Token);
         }
         catch (Exception exception)
         {
