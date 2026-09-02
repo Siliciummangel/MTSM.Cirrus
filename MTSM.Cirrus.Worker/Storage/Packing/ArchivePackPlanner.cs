@@ -30,56 +30,70 @@ public sealed class ArchivePackPlanner(
         var candidates = new Dictionary<string, PackChunkCandidate>(StringComparer.OrdinalIgnoreCase);
         var pending = new List<PendingPackChunk>();
         var packIds = new List<long>();
-        TemporaryPackBuilder? builder = null;
+        StreamingPackWriter? builder = null;
+        string? packKey = null;
+
+        StreamingPackWriter StartPack()
+        {
+            packKey = packWriter.CreateObjectKey(items[0]);
+            return new StreamingPackWriter(storage, items[0].BucketName, packKey, cancellationToken);
+        }
 
         async Task FlushAsync()
         {
             if (builder is null || builder.Length == 0) return;
-            TemporaryPackBuilder current = builder;
+            StreamingPackWriter current = builder;
             builder = null;
-            UploadedPack uploaded = await packWriter.UploadAsync(storage, db, items[0], current, pending, cancellationToken);
+            UploadedPack uploaded = await packWriter.UploadAsync(db, items[0], packKey!, current, pending, cancellationToken);
             packIds.Add(uploaded.PackId);
             foreach (PackChunkCandidate candidate in uploaded.Candidates)
                 candidates[candidate.Hash] = candidate;
             pending.Clear();
         }
 
-        foreach (ArchiveObject item in items.OrderBy(x => x.ArchiveObjectId))
+        try
         {
-            var plan = new ArchivePackPlan(item.ArchiveObjectId, []);
-            plans.Add(plan);
-            await using Stream source = await storage.OpenReadAsync(item.BucketName, item.StagingObjectKey!, cancellationToken);
-            await foreach (ContentChunkData chunk in chunker.ChunkAsync(source, profile, cancellationToken))
+            foreach (ArchiveObject item in items.OrderBy(x => x.ArchiveObjectId))
             {
-                string hash = Convert.ToHexString(SHA256.HashData(chunk.Bytes)).ToLowerInvariant();
-                if (!existing.ContainsKey(hash) && !candidates.ContainsKey(hash) && !pending.Any(x => x.Hash == hash))
+                var plan = new ArchivePackPlan(item.ArchiveObjectId, []);
+                plans.Add(plan);
+                await using Stream source = await storage.OpenReadAsync(item.BucketName, item.StagingObjectKey!, cancellationToken);
+                await foreach (ContentChunkData chunk in chunker.ChunkAsync(source, profile, cancellationToken))
                 {
-                    long id = await db.ContentChunks.AsNoTracking()
-                        .Where(x => x.TenantId == item.TenantId && x.HashAlgorithm == "SHA-256" && x.ChunkHash == hash)
-                        .Select(x => x.ContentChunkId).SingleOrDefaultAsync(cancellationToken);
-                    if (id != 0) existing[hash] = id;
+                    string hash = Convert.ToHexString(SHA256.HashData(chunk.Bytes)).ToLowerInvariant();
+                    if (!existing.ContainsKey(hash) && !candidates.ContainsKey(hash) && !pending.Any(x => x.Hash == hash))
+                    {
+                        long id = await db.ContentChunks.AsNoTracking()
+                            .Where(x => x.TenantId == item.TenantId && x.HashAlgorithm == "SHA-256" && x.ChunkHash == hash)
+                            .Select(x => x.ContentChunkId).SingleOrDefaultAsync(cancellationToken);
+                        if (id != 0) existing[hash] = id;
+                    }
+                    if (existing.TryGetValue(hash, out long existingId))
+                    {
+                        plan.Chunks.Add(new(chunk.SequenceNumber, chunk.OriginalOffset, chunk.Bytes.Length, hash, existingId));
+                        continue;
+                    }
+                    if (!candidates.ContainsKey(hash) && !pending.Any(x => x.Hash == hash))
+                    {
+                        byte[] stored;
+                        using (var compressor = new Compressor(_options.ZstdCompressionLevel))
+                            stored = compressor.Wrap(chunk.Bytes).ToArray();
+                        builder ??= StartPack();
+                        if (builder.Length > 0 && builder.Length + stored.Length > _options.TargetPackSizeBytes)
+                        { await FlushAsync(); builder = StartPack(); }
+                        PackEntry entry = await builder.AppendAsync(stored, chunk.Bytes.Length, cancellationToken);
+                        pending.Add(new PendingPackChunk(hash, chunk.Bytes.Length, entry));
+                        if (builder.Length >= _options.TargetPackSizeBytes) await FlushAsync();
+                    }
+                    plan.Chunks.Add(new(chunk.SequenceNumber, chunk.OriginalOffset, chunk.Bytes.Length, hash, null));
                 }
-                if (existing.TryGetValue(hash, out long existingId))
-                {
-                    plan.Chunks.Add(new(chunk.SequenceNumber, chunk.OriginalOffset, chunk.Bytes.Length, hash, existingId));
-                    continue;
-                }
-                if (!candidates.ContainsKey(hash) && !pending.Any(x => x.Hash == hash))
-                {
-                    builder ??= new TemporaryPackBuilder();
-                    if (builder.Length > 0 && builder.Length + chunk.Bytes.Length > _options.TargetPackSizeBytes)
-                    { await FlushAsync(); builder = new TemporaryPackBuilder(); }
-                    byte[] stored;
-                    using (var compressor = new Compressor(_options.ZstdCompressionLevel))
-                        stored = compressor.Wrap(chunk.Bytes).ToArray();
-                    PackEntry entry = await builder.AppendAsync(stored, chunk.Bytes.Length, cancellationToken);
-                    pending.Add(new PendingPackChunk(hash, chunk.Bytes.Length, entry));
-                    if (builder.Length >= _options.TargetPackSizeBytes) await FlushAsync();
-                }
-                plan.Chunks.Add(new(chunk.SequenceNumber, chunk.OriginalOffset, chunk.Bytes.Length, hash, null));
             }
+            await FlushAsync();
+            await committer.CommitAsync(db, items, plans, candidates, packIds, profile, lease, cancellationToken);
         }
-        await FlushAsync();
-        await committer.CommitAsync(db, items, plans, candidates, packIds, profile, lease, cancellationToken);
+        finally
+        {
+            if (builder is not null) await builder.DisposeAsync();
+        }
     }
 }
