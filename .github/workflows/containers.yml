@@ -270,7 +270,7 @@ jobs:
 
       - name: Generate SPDX SBOM
         if: github.event_name != 'pull_request'
-        uses: anchore/sbom-action@v0.24.0
+        uses: anchore/sbom-action@v0.24.2
         with:
           image: ${{ format('{0}@{1}', steps.metadata.outputs.image, steps.build.outputs.digest) }}
           format: spdx-json
